@@ -1,0 +1,529 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Manufacturing Job Status Dashboard</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;background:#F0F2F5;color:#1A2332;font-size:14px;line-height:1.5;min-height:100vh;}
+
+/* ── SETUP PANEL ── */
+#setupPanel{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;padding:2rem;gap:1.5rem;}
+.sp-badge{font-size:11px;font-weight:600;color:#64748B;letter-spacing:.08em;text-transform:uppercase;}
+.sp-title{font-size:26px;font-weight:600;color:#1A2332;text-align:center;}
+.sp-card{background:#fff;border:1px solid #E2E8F0;border-radius:14px;padding:2rem;width:100%;max-width:440px;text-align:center;}
+.sp-card h3{font-size:14px;font-weight:600;color:#1A2332;margin-bottom:.5rem;}
+.sp-card p{font-size:12px;color:#64748B;margin-bottom:1.25rem;line-height:1.7;}
+.btn-primary{background:#D97706;color:#fff;border:none;border-radius:8px;padding:11px 24px;font-size:14px;font-weight:600;cursor:pointer;width:100%;transition:background .15s;}
+.btn-primary:hover{background:#B45309;}
+.btn-secondary{background:#fff;color:#475569;border:1px solid #CBD5E1;border-radius:8px;padding:10px 22px;font-size:13px;font-weight:500;cursor:pointer;width:100%;transition:background .15s;}
+.btn-secondary:hover{background:#F8FAFC;}
+.sp-divider{font-size:11px;color:#94A3B8;width:100%;text-align:center;position:relative;}
+.sp-divider::before,.sp-divider::after{content:'';position:absolute;top:50%;width:42%;height:1px;background:#E2E8F0;}
+.sp-divider::before{left:0;}.sp-divider::after{right:0;}
+.fallback-wrap{position:relative;width:100%;}
+.fallback-wrap input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;}
+.steps{display:flex;gap:1rem;max-width:540px;flex-wrap:wrap;justify-content:center;}
+.step{background:#fff;border:1px solid #E2E8F0;border-radius:10px;padding:.85rem 1rem;flex:1;min-width:140px;}
+.step-n{font-size:10px;font-weight:700;color:#D97706;margin-bottom:3px;letter-spacing:.06em;}
+.step-t{font-size:12px;font-weight:600;color:#1A2332;margin-bottom:2px;}
+.step-d{font-size:11px;color:#64748B;line-height:1.5;}
+.warn-box{background:#FEF3C7;border:1px solid #FDE68A;border-radius:8px;padding:.75rem 1rem;font-size:12px;color:#92400E;max-width:440px;text-align:center;display:none;}
+/* ── Drag & Drop Zone ── */
+.drop-zone{border:2px dashed #CBD5E1;border-radius:12px;padding:1.5rem 1rem;margin-top:1.25rem;cursor:pointer;transition:border-color .2s,background .2s;position:relative;}
+.drop-zone:hover,.drop-zone.drag-over{border-color:#D97706;background:#FFFBF0;}
+.drop-zone input[type=file]{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%;}
+.drop-zone-icon{font-size:28px;margin-bottom:.4rem;}
+.drop-zone-text{font-size:13px;color:#64748B;line-height:1.6;}
+.drop-zone-text strong{color:#D97706;}
+#setupError{color:#DC2626;font-size:13px;background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;padding:8px 14px;max-width:440px;display:none;}
+
+/* ── DASHBOARD ── */
+#dashboard{display:none;padding:1.25rem 1.5rem;max-width:1400px;margin:0 auto;}
+
+/* header */
+.dh{display:flex;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:1.25rem;padding:.85rem 1.25rem;background:#fff;border:1px solid #E2E8F0;border-radius:10px;flex-wrap:wrap;}
+.dh-title{font-size:16px;font-weight:600;}
+.dh-meta{font-size:11px;color:#64748B;margin-top:2px;}
+.dh-right{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+.pill{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:500;padding:5px 11px;border-radius:20px;white-space:nowrap;}
+.pill.live{background:#DCFCE7;color:#166534;}
+.pill.idle{background:#FEF3C7;color:#92400E;}
+.pill.live::before,.pill.idle::before{content:'';width:7px;height:7px;border-radius:50%;flex-shrink:0;}
+.pill.live::before{background:#22C55E;animation:blink 2s infinite;}
+.pill.idle::before{background:#D97706;}
+@keyframes blink{0%,100%{opacity:1;}50%{opacity:.3;}}
+.cdown{font-size:11px;color:#94A3B8;white-space:nowrap;}
+.btn-h{background:#fff;border:1px solid #CBD5E1;border-radius:7px;padding:6px 13px;font-size:12px;cursor:pointer;color:#475569;white-space:nowrap;}
+.btn-h:hover{background:#F8FAFC;}
+.btn-h.amber{background:#D97706;color:#fff;border-color:#B45309;font-weight:600;}
+.btn-h.amber:hover{background:#B45309;}
+select.hsel{font-size:12px;height:32px;padding:0 8px;border:1px solid #CBD5E1;border-radius:7px;background:#fff;outline:none;}
+
+/* kpi */
+.kr{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:1.25rem;}
+.kc{background:#fff;border-radius:10px;padding:.85rem 1rem;border:1px solid #E2E8F0;}
+.kl{font-size:10px;color:#64748B;margin-bottom:4px;font-weight:500;}
+.kv{font-size:24px;font-weight:700;line-height:1.2;}
+.kd{font-size:10px;color:#94A3B8;margin-top:2px;}
+
+/* ── FILTER PANEL ── */
+.fp{background:#fff;border:1px solid #E2E8F0;border-radius:10px;padding:.85rem 1.1rem;margin-bottom:.75rem;}
+.fp-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.fp-row+.fp-row{margin-top:.6rem;padding-top:.6rem;border-top:1px solid #F1F5F9;}
+.fp-lbl{font-size:11px;font-weight:600;color:#64748B;white-space:nowrap;min-width:80px;}
+
+/* checkbox pills */
+.chk-pill{display:inline-flex;align-items:center;gap:5px;cursor:pointer;padding:5px 12px;border-radius:20px;border:1.5px solid;font-size:12px;font-weight:600;transition:all .15s;user-select:none;line-height:1.4;}
+.chk-pill input[type=checkbox]{display:none;}
+.chk-pill::before{content:'✓';font-size:10px;font-weight:700;}
+/* checked colours */
+.chk-open  {background:#EFF6FF;color:#1D4ED8;border-color:#BFDBFE;}
+.chk-inprog{background:#FFFBEB;color:#92400E;border-color:#FDE68A;}
+.chk-hold  {background:#F8FAFC;color:#475569;border-color:#CBD5E1;}
+.chk-done  {background:#F0FDF4;color:#166534;border-color:#BBF7D0;}
+.chk-over  {background:#FEF2F2;color:#991B1B;border-color:#FECACA;}
+/* unchecked — grey override using :has() */
+.chk-pill:has(input:not(:checked)){background:#F1F5F9 !important;color:#94A3B8 !important;border-color:#E2E8F0 !important;}
+.chk-pill:has(input:not(:checked))::before{content:'';width:10px;}
+
+/* dropdown + text filters */
+.fp-row select,.fp-row input[type=text]{font-size:13px;height:34px;padding:0 10px;border:1px solid #CBD5E1;border-radius:7px;background:#fff;color:#1A2332;outline:none;}
+.fp-row select:focus,.fp-row input:focus{border-color:#D97706;}
+.btn-g{background:#fff;border:1px solid #CBD5E1;border-radius:7px;padding:0 14px;height:34px;font-size:12px;cursor:pointer;color:#475569;}
+.btn-g:hover{background:#F8FAFC;}
+.btn-link{background:none;border:none;font-size:12px;color:#D97706;cursor:pointer;padding:0 4px;font-weight:600;}
+.btn-link:hover{text-decoration:underline;}
+
+/* ── TABLE ── */
+.tc{background:#fff;border-radius:10px;border:1px solid #E2E8F0;overflow:hidden;}
+.jt{width:100%;border-collapse:collapse;font-size:14px;}
+.jt thead th{background:#F8FAFC;padding:10px 13px;text-align:center;font-size:12px;font-weight:600;color:#64748B;border-bottom:1px solid #E2E8F0;white-space:nowrap;cursor:pointer;user-select:none;letter-spacing:.03em;}
+.jt thead th:hover{color:#1A2332;}
+.jt tbody tr{border-bottom:1px solid #F1F5F9;}
+.jt tbody tr:last-child{border-bottom:none;}
+.jt tbody tr:hover{background:#FAFAFA;}
+.jt td{padding:10px 13px;vertical-align:middle;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center;}
+.mono{font-family:'Courier New',monospace;font-size:13px;color:#64748B;}
+.bd{display:inline-block;padding:3px 10px;border-radius:5px;font-size:12px;font-weight:700;line-height:1.6;}
+.bs{background:#EFF6FF;color:#1D4ED8;}.bw{background:#FFFBEB;color:#92400E;}
+.bg{background:#F8FAFC;color:#64748B;border:1px solid #E2E8F0;}
+.bv{background:#F0FDF4;color:#166534;}.br{background:#FEF2F2;color:#991B1B;}
+.cd-badge{display:inline-block;padding:3px 10px;border-radius:5px;font-size:12px;font-weight:700;line-height:1.6;white-space:nowrap;}
+.cd-ok  {background:#F0FDF4;color:#166534;}
+.cd-warn{background:#FFFBEB;color:#92400E;}
+.cd-due {background:#FFF7ED;color:#C2410C;}
+.cd-over{background:#FEF2F2;color:#991B1B;}
+.cd-none{background:#F8FAFC;color:#94A3B8;border:1px solid #E2E8F0;}
+.tf{padding:10px 13px;font-size:12px;color:#64748B;border-top:1px solid #E2E8F0;background:#F8FAFC;}
+/* ── Collection / Delivery / TBD badges ── */
+.bt-c  {background:#EFF6FF;color:#1D4ED8;border:1px solid #BFDBFE;}
+.bt-d  {background:#F0FDF4;color:#166534;border:1px solid #BBF7D0;}
+.bt-tbd{background:#F8FAFC;color:#475569;border:1px solid #CBD5E1;}
+
+.toast{position:fixed;bottom:1.5rem;right:1.5rem;background:#1A2332;color:#fff;padding:10px 18px;border-radius:9px;font-size:13px;font-weight:500;opacity:0;transform:translateY(8px);transition:all .25s;pointer-events:none;z-index:999;}
+.toast.show{opacity:1;transform:translateY(0);}
+@media(max-width:900px){.kr{grid-template-columns:repeat(3,1fr);}}
+@media(max-width:600px){.kr{grid-template-columns:repeat(2,1fr);}}
+</style>
+</head>
+<body>
+
+<!-- ═══ SETUP PANEL ═══ -->
+<div id="setupPanel">
+  <div class="sp-badge">Manufacturing Dashboard</div>
+  <div class="sp-title">Job Status &amp; Ticketing</div>
+
+  <div class="sp-card">
+    <h3>Connect your Excel export</h3>
+    <p>Select your <strong>JobStatusExport.csv</strong> file once. The dashboard will remember it and automatically refresh every time your VBA macro runs a new export.</p>
+    <button class="btn-primary" id="btnPick" onclick="pickFile()">Select CSV file &amp; connect</button>
+    <br><br>
+    <div class="sp-divider">or drag &amp; drop</div><br>
+    <div class="drop-zone" id="dropZone">
+      <div class="drop-zone-icon">📂</div>
+      <div class="drop-zone-text">Drag your <strong>JobStatusExport.csv</strong> here<br>or <strong>click to browse</strong></div>
+      <input type="file" accept=".csv" onchange="loadFallback(this.files[0])">
+    </div>
+  </div>
+
+  <div id="setupError"></div>
+  <div class="warn-box" id="compatWarn">
+    Your browser doesn't support auto-watching (use Chrome or Edge for that). You can still load the CSV manually — just re-select it after each export.
+  </div>
+
+  <div class="steps">
+    <div class="step"><div class="step-n">Step 1</div><div class="step-t">Run VBA macro</div><div class="step-d">Click Export in Excel — CSV saves to your Desktop</div></div>
+    <div class="step"><div class="step-n">Step 2</div><div class="step-t">Select file once</div><div class="step-d">Click above and pick JobStatusExport.csv</div></div>
+    <div class="step"><div class="step-n">Step 3</div><div class="step-t">Auto-refreshes</div><div class="step-d">Dashboard watches the file and updates every 60 seconds</div></div>
+  </div>
+</div>
+
+<!-- ═══ DASHBOARD ═══ -->
+<div id="dashboard">
+
+  <!-- header -->
+  <div class="dh">
+    <div>
+      <div class="dh-title">Manufacturing Job Status</div>
+      <div class="dh-meta" id="dhMeta"></div>
+    </div>
+    <div class="dh-right">
+      <span class="pill idle" id="pill">Connecting…</span>
+      <span class="cdown" id="cdown"></span>
+      <select class="hsel" onchange="setRate(this.value)">
+        <option value="30">Auto-refresh: 30s</option>
+        <option value="60" selected>Auto-refresh: 60s</option>
+        <option value="120">Auto-refresh: 2 min</option>
+        <option value="300">Auto-refresh: 5 min</option>
+        <option value="0">Manual only</option>
+      </select>
+      <button class="btn-h amber" onclick="manualRefresh()">Refresh now</button>
+      <button class="btn-h" onclick="changeFile()">Change file</button>
+    </div>
+  </div>
+
+  <!-- kpi cards -->
+  <div class="kr" id="kpr"></div>
+
+  <!-- filter panel -->
+  <div class="fp">
+
+    <!-- row 1: status checkboxes -->
+    <div class="fp-row">
+      <span class="fp-lbl">Show status:</span>
+      <label class="chk-pill chk-open"   title="Open jobs"><input type="checkbox" value="Open"        checked onchange="render()"> Open</label>
+      <label class="chk-pill chk-inprog" title="In Progress"><input type="checkbox" value="In Progress" checked onchange="render()"> In Progress</label>
+      <label class="chk-pill chk-hold"   title="On Hold"><input type="checkbox" value="On Hold"             onchange="render()"> On Hold</label>
+      <label class="chk-pill chk-done"   title="Completed"><input type="checkbox" value="Completed"         onchange="render()"> Completed</label>
+      <label class="chk-pill chk-over"   title="Overdue"><input type="checkbox" value="Overdue"      checked onchange="render()"> Overdue</label>
+      <button class="btn-link" onclick="setAllStatus(true)">Select all</button>
+      <button class="btn-link" style="color:#94A3B8;" onclick="setAllStatus(false)">Clear all</button>
+    </div>
+
+    <!-- row 2: search + dropdowns -->
+    <div class="fp-row">
+      <span class="fp-lbl">Search &amp; filter:</span>
+      <input type="text" id="fsrc" placeholder="Job ID or description…" style="width:210px;" oninput="render()">
+      <select id="fpr" onchange="render()"><option value="">All priorities</option></select>
+      <select id="fln" onchange="render()"><option value="">All lines</option></select>
+      <button class="btn-g" onclick="resetFilters()">Reset all</button>
+    </div>
+
+  </div>
+
+  <!-- job table -->
+  <div class="tc">
+    <table class="jt">
+      <thead><tr>
+        <th style="width:95px;"  data-col="id"        onclick="sortBy('id')">Job ID</th>
+        <th style="width:130px;" data-col="colL"       onclick="sortBy('colL')" id="thColL">Client/Company</th>
+        <th style="width:210px;" data-col="desc"       onclick="sortBy('desc')">Description</th>
+        <th style="width:82px;"  data-col="line"       onclick="sortBy('line')">Line</th>
+        <th style="width:110px;" data-col="operator"   onclick="sortBy('operator')">Operator</th>
+        <th style="width:100px;" data-col="type"        onclick="sortBy('type')">Transport</th>
+        <th style="width:100px;" data-col="weight"      onclick="sortBy('weight')">Weight (kg)</th>
+        <th style="width:80px;"  data-col="priority"   onclick="sortBy('priority')">Priority</th>
+        <th style="width:96px;"  data-col="status"     onclick="sortBy('status')">Status</th>
+        <th style="width:84px;"  data-col="due"        onclick="sortBy('due')">Due date</th>
+        <th style="width:110px;" data-col="countdown"  onclick="sortBy('countdown')">Countdown</th>
+        <th style="width:86px;"  data-col="raised"     onclick="sortBy('raised')">Raised</th>
+      </tr></thead>
+      <tbody id="jbd"></tbody>
+    </table>
+    <div class="tf" id="jtf">No data loaded</div>
+  </div>
+
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ── state ─────────────────────────────────────────────────────
+let JOBS=[], sortCol='id', sortDir=1;
+let colLHeader='Client/Company'; // dynamically set from CSV header row
+let fileHandle=null, autoTm=null, cdTm=null, nextT=0, interval=60, lastMod=null;
+const hasAPI=typeof window.showOpenFilePicker==='function';
+
+// ── IndexedDB ─────────────────────────────────────────────────
+async function dbOpen(){return new Promise((res,rej)=>{const r=indexedDB.open('MfgDash',1);r.onupgradeneeded=e=>e.target.result.createObjectStore('s');r.onsuccess=e=>res(e.target.result);r.onerror=rej;});}
+async function dbSet(k,v){const db=await dbOpen();return new Promise((res,rej)=>{const tx=db.transaction('s','readwrite');tx.objectStore('s').put(v,k);tx.oncomplete=res;tx.onerror=rej;});}
+async function dbGet(k){try{const db=await dbOpen();return new Promise((res,rej)=>{const tx=db.transaction('s','readonly');const rq=tx.objectStore('s').get(k);rq.onsuccess=e=>res(e.target.result);rq.onerror=rej;});}catch{return null;}}
+async function dbDel(k){try{const db=await dbOpen();return new Promise((res,rej)=>{const tx=db.transaction('s','readwrite');tx.objectStore('s').delete(k);tx.oncomplete=res;tx.onerror=rej;});}catch{}}
+
+// ── file picking ──────────────────────────────────────────────
+async function pickFile(){
+  if(!hasAPI){document.getElementById('compatWarn').style.display='block';return;}
+  try{
+    const [h]=await window.showOpenFilePicker({types:[{description:'CSV',accept:{'text/csv':['.csv']}}],multiple:false});
+    fileHandle=h;await dbSet('fh',h);await readHandle(true);
+  }catch(e){if(e.name!=='AbortError')showErr('Could not open file: '+e.message);}
+}
+
+async function readHandle(first){
+  if(!fileHandle)return false;
+  try{
+    const perm=await fileHandle.queryPermission({mode:'read'});
+    if(perm!=='granted'){
+      const req=await fileHandle.requestPermission({mode:'read'});
+      if(req!=='granted'){setPill('idle','Permission needed — click Refresh now');return false;}
+    }
+    const file=await fileHandle.getFile();
+    if(!first&&file.lastModified===lastMod)return true;
+    lastMod=file.lastModified;
+    const text=await file.text();
+    const jobs=parseCSV(text);
+    if(!jobs.length)throw new Error('No jobs found — check column names in VBA config.');
+    JOBS=jobs;
+    const dt=new Date(file.lastModified);
+    document.getElementById('dhMeta').textContent=`Source: ${file.name}  ·  File updated: ${dt.toLocaleDateString('en-GB',{day:'numeric',month:'short'})} at ${dt.toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})}`;
+    if(!first){toast(`Auto-refreshed — ${jobs.length} jobs`);updateDash();}
+    else showDash();
+    setPill('live','Live — auto-watching');
+    return true;
+  }catch(e){setPill('idle','Error: '+e.message.substring(0,50));return false;}
+}
+
+function loadFallback(file){
+  if(!file)return;
+  const r=new FileReader();
+  r.onload=e=>{
+    try{
+      const jobs=parseCSV(e.target.result);
+      if(!jobs.length)throw new Error('No jobs found — check column names in VBA config.');
+      JOBS=jobs;
+      document.getElementById('dhMeta').textContent=`Source: ${file.name}  ·  Loaded manually (use Chrome/Edge for auto-refresh)`;
+      showDash();setPill('idle','Manual mode — no auto-refresh');
+    }catch(ex){showErr('Error: '+ex.message);}
+  };
+  r.readAsText(file);
+}
+
+// ── Drag & Drop ───────────────────────────────────────────────
+(function(){
+  const zone=()=>document.getElementById('dropZone');
+  document.addEventListener('dragover',e=>{e.preventDefault();const z=zone();if(z)z.classList.add('drag-over');});
+  document.addEventListener('dragleave',e=>{if(!e.relatedTarget||!document.contains(e.relatedTarget)){const z=zone();if(z)z.classList.remove('drag-over');}});
+  document.addEventListener('drop',async e=>{
+    e.preventDefault();
+    const z=zone();if(z)z.classList.remove('drag-over');
+    const items=[...e.dataTransfer.items];
+    const csvItem=items.find(i=>i.kind==='file'&&(i.type==='text/csv'||e.dataTransfer.files[0]?.name.endsWith('.csv')));
+    if(!csvItem){toast('Please drop a .csv file');return;}
+    // Try to get a live FileSystemFileHandle for auto-watching
+    if(csvItem.getAsFileSystemHandle){
+      try{
+        const handle=await csvItem.getAsFileSystemHandle();
+        if(handle&&handle.kind==='file'){
+          fileHandle=handle;
+          await dbSet('fh',handle);
+          await readHandle(true);
+          return;
+        }
+      }catch(e){/* fall through to manual */}
+    }
+    // Fallback: manual one-time load
+    const file=csvItem.getAsFile();
+    if(file)loadFallback(file);
+    else toast('Please drop a .csv file');
+  });
+})();
+
+// ── CSV parser ────────────────────────────────────────────────
+function parseCSV(raw){
+  const lines=raw.trim().split(/\r?\n/);
+  if(lines.length<2)throw new Error('File empty.');
+  const hdrs=parseRow(lines[0]);
+  const idx=n=>hdrs.findIndex(h=>h.toLowerCase()===n.toLowerCase());
+  const jobs=[];
+  for(let i=1;i<lines.length;i++){
+    if(!lines[i].trim())continue;
+    const c=parseRow(lines[i]);
+    const g=n=>(c[idx(n)]||'').trim();
+    jobs.push({id:g('job id'),desc:g('description'),line:g('line'),
+      operator:g('operator'),priority:g('priority'),status:g('status'),
+      due:g('due date'),countdown:daysLeft(g('due date')),
+      raised:g('date raised'),
+      colL:(c[9]||'').trim(),
+      type:(c[10]||'').trim().toUpperCase(),
+      weight:(c[11]||'').trim()});
+  }
+  return jobs.filter(j=>j.id);
+}
+function parseRow(line){
+  const r=[];let cur='',inQ=false;
+  for(let i=0;i<line.length;i++){
+    const ch=line[i];
+    if(ch==='"'){if(inQ&&line[i+1]==='"'){cur+='"';i++;}else inQ=!inQ;}
+    else if(ch===','&&!inQ){r.push(cur);cur='';}
+    else cur+=ch;
+  }
+  r.push(cur);return r;
+}
+
+// ── show / update dashboard ───────────────────────────────────
+function showDash(){
+  document.getElementById('setupPanel').style.display='none';
+  document.getElementById('dashboard').style.display='block';
+  populateFilters();render();
+  if(fileHandle)startAuto();
+}
+function updateDash(){populateFilters();render();}
+
+function populateFilters(){
+  const fill=(id,vals,all)=>{const s=document.getElementById(id);const v=s.value;s.innerHTML=`<option value="">${all}</option>`;[...new Set(vals.filter(Boolean))].sort().forEach(x=>{const o=document.createElement('option');o.textContent=x;s.appendChild(o);});s.value=v;};
+  fill('fpr',JOBS.map(j=>j.priority),'All priorities');
+  fill('fln',JOBS.map(j=>j.line),'All lines');
+}
+
+// ── auto-refresh ──────────────────────────────────────────────
+function startAuto(){
+  clearInterval(autoTm);clearInterval(cdTm);
+  if(interval===0){document.getElementById('cdown').textContent='';return;}
+  nextT=Date.now()+interval*1000;
+  autoTm=setInterval(()=>readHandle(false),interval*1000);
+  cdTm=setInterval(()=>{
+    const s=Math.max(0,Math.round((nextT-Date.now())/1000));
+    document.getElementById('cdown').textContent=interval?`Next refresh in ${s}s`:'';
+    if(s===0)nextT=Date.now()+interval*1000;
+  },1000);
+}
+function setRate(v){interval=parseInt(v);if(fileHandle)startAuto();}
+async function manualRefresh(){if(fileHandle){lastMod=null;await readHandle(false);}else toast('No file connected — select a file first');}
+function changeFile(){
+  clearInterval(autoTm);clearInterval(cdTm);
+  fileHandle=null;lastMod=null;dbDel('fh');JOBS=[];
+  document.getElementById('dashboard').style.display='none';
+  document.getElementById('setupPanel').style.display='flex';
+}
+
+// ── status checkbox helpers ───────────────────────────────────
+function getCheckedStatuses(){
+  return [...document.querySelectorAll('.chk-pill input:checked')].map(c=>c.value);
+}
+function setAllStatus(checked){
+  document.querySelectorAll('.chk-pill input').forEach(c=>c.checked=checked);
+  render();
+}
+
+// ── table + KPIs ──────────────────────────────────────────────
+const KPI=[
+  {label:'Total jobs',   key:'total',        col:'#1A2332', sub:'all jobs'},
+  {label:'Open',         key:'Open',         col:'#2563EB', sub:'awaiting start'},
+  {label:'In progress',  key:'In Progress',  col:'#D97706', sub:'currently active'},
+  {label:'On hold',      key:'On Hold',      col:'#94A3B8', sub:'pending action'},
+  {label:'Completed',    key:'Completed',    col:'#16A34A', sub:'this period'},
+  {label:'Overdue',      key:'Overdue',      col:'#DC2626', sub:'requires attention'},
+];
+const scls=s=>({Open:'bs','In Progress':'bw','On Hold':'bg',Completed:'bv',Overdue:'br'}[s]||'bg');
+const pcls=p=>({Critical:'br',High:'bw',Medium:'bs',Low:'bg'}[p]||'bg');
+const tcls=t=>({C:'bt-c',D:'bt-d',TBD:'bt-tbd'}[t]||'bt-tbd');
+const tlbl=t=>({C:'C — Collection',D:'D — Delivery',TBD:'TBD — To Be Determined'}[t]||t||'—');
+const fd=d=>{if(!d)return'';const p=d.split('-');return p.length===3?`${p[2]}/${p[1]}/${p[0].slice(2)}`:d;};
+
+// Compute days left from a YYYY-MM-DD due date string. Returns null if no date.
+function daysLeft(due){
+  if(!due)return null;
+  const today=new Date();today.setHours(0,0,0,0);
+  const dt=new Date(due);if(isNaN(dt))return null;
+  dt.setHours(0,0,0,0);
+  return Math.round((dt-today)/(1000*60*60*24));
+}
+
+// Render a countdown badge given days remaining
+function cdBadge(days){
+  if(days===null)return `<span class="cd-badge cd-none">—</span>`;
+  if(days<0)  return `<span class="cd-badge cd-over">${Math.abs(days)}d overdue</span>`;
+  if(days===0)return `<span class="cd-badge cd-due">Due today</span>`;
+  if(days<=7) return `<span class="cd-badge cd-warn">${days}d left</span>`;
+  return            `<span class="cd-badge cd-ok">${days}d left</span>`;
+}
+
+function getFiltered(){
+  const s=(document.getElementById('fsrc').value||'').toLowerCase();
+  const fp=document.getElementById('fpr').value;
+  const fl=document.getElementById('fln').value;
+  const checked=getCheckedStatuses();
+  return JOBS.filter(j=>
+    (!s||j.id.toLowerCase().includes(s)||j.desc.toLowerCase().includes(s))&&
+    checked.includes(j.status)&&
+    (!fp||j.priority===fp)&&
+    (!fl||j.line===fl)
+  );
+}
+
+function sortBy(col){
+  if(sortCol===col)sortDir*=-1;else{sortCol=col;sortDir=1;}
+  document.querySelectorAll('.jt thead th').forEach(th=>{
+    if(th.id==='thColL')return; // handled dynamically in render()
+    th.textContent=th.textContent.replace(/ [↑↓]$/,'');
+    if(th.dataset.col===col)th.textContent+=' '+(sortDir===1?'↑':'↓');
+  });
+  render();
+}
+
+function render(){
+  const jobs=getFiltered().sort((a,b)=>{
+    const av=a[sortCol],bv=b[sortCol];
+    // Countdown: null (no date) always sorts last
+    if(sortCol==='countdown'){
+      if(av===null&&bv===null)return 0;
+      if(av===null)return 1;
+      if(bv===null)return -1;
+      return(av-bv)*sortDir;
+    }
+    return(typeof av==='number'?av-bv:String(av||'').localeCompare(String(bv||'')))*sortDir;
+  });
+  // KPI cards always show totals from full dataset
+  const cnt={total:JOBS.length};
+  ['Open','In Progress','On Hold','Completed','Overdue'].forEach(s=>cnt[s]=JOBS.filter(j=>j.status===s).length);
+  document.getElementById('kpr').innerHTML=KPI.map(k=>
+    `<div class="kc"><div class="kl">${k.label}</div><div class="kv" style="color:${k.col}">${cnt[k.key]??0}</div><div class="kd">${k.sub}</div></div>`
+  ).join('');
+
+  document.getElementById('thColL').textContent=colLHeader+(sortCol==='colL'?' '+(sortDir===1?'↑':'↓'):'');
+
+  document.getElementById('jbd').innerHTML=jobs.map(j=>`<tr>
+    <td class="mono">${j.id}</td>
+    <td style="color:#64748B;" title="${j.colL}">${j.colL||'—'}</td>
+    <td title="${j.desc}" style="color:#1A2332;">${j.desc}</td>
+    <td style="color:#64748B;">${j.line}</td>
+    <td style="color:#1A2332;">${j.operator}</td>
+    <td><span class="bd ${tcls(j.type)}" title="${tlbl(j.type)}">${j.type||'—'}</span></td>
+    <td style="color:#1A2332;">${j.weight||'—'}</td>
+    <td><span class="bd ${pcls(j.priority)}">${j.priority}</span></td>
+    <td><span class="bd ${scls(j.status)}">${j.status}</span></td>
+    <td style="color:${j.status==='Overdue'?'#DC2626':'#1A2332'};">${fd(j.due)}</td>
+    <td>${cdBadge(j.countdown)}</td>
+    <td style="color:#64748B;">${fd(j.raised)}</td>
+  </tr>`).join('');
+
+  const hiddenCount=JOBS.length-jobs.length;
+  document.getElementById('jtf').textContent=
+    `Showing ${jobs.length} of ${JOBS.length} jobs`+
+    (hiddenCount>0?` — ${hiddenCount} hidden by filters`:'');
+}
+
+function resetFilters(){
+  document.getElementById('fsrc').value='';
+  document.getElementById('fpr').value='';
+  document.getElementById('fln').value='';
+  setAllStatus(true);
+}
+
+// ── helpers ───────────────────────────────────────────────────
+function setPill(type,text){const p=document.getElementById('pill');p.className='pill '+type;p.textContent=text;}
+let ttm;
+function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');clearTimeout(ttm);ttm=setTimeout(()=>t.classList.remove('show'),3000);}
+function showErr(msg){const e=document.getElementById('setupError');e.textContent=msg;e.style.display='block';setTimeout(()=>e.style.display='none',6000);}
+
+// ── startup: try to reconnect saved handle ────────────────────
+(async()=>{
+  if(!hasAPI){document.getElementById('btnPick').style.display='none';document.getElementById('compatWarn').style.display='block';return;}
+  const h=await dbGet('fh');
+  if(h){fileHandle=h;const ok=await readHandle(true);if(!ok)fileHandle=null;}
+})();
+</script>
+</body>
+</html>
