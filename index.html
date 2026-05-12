@@ -518,12 +518,44 @@ let ttm;
 function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');clearTimeout(ttm);ttm=setTimeout(()=>t.classList.remove('show'),3000);}
 function showErr(msg){const e=document.getElementById('setupError');e.textContent=msg;e.style.display='block';setTimeout(()=>e.style.display='none',6000);}
 
-// ── startup: try to reconnect saved handle ────────────────────
-(async()=>{
-  if(!hasAPI){document.getElementById('btnPick').style.display='none';document.getElementById('compatWarn').style.display='block';return;}
-  const h=await dbGet('fh');
-  if(h){fileHandle=h;const ok=await readHandle(true);if(!ok)fileHandle=null;}
-})();
+
+// ── GitHub Pages CSV Auto Loader ──────────────────────────────
+async function loadGitHubCSV(){
+  try{
+    const response = await fetch('data/JobStatusExport.csv?t=' + Date.now());
+
+    if(!response.ok){
+      throw new Error('Unable to load dashboard.csv');
+    }
+
+    const text = await response.text();
+    const jobs = parseCSV(text);
+
+    if(!jobs.length){
+      throw new Error('No jobs found in CSV');
+    }
+
+    JOBS = jobs;
+
+    document.getElementById('dhMeta').textContent =
+      'Live GitHub CSV connection — Auto refresh active';
+
+    showDash();
+    setPill('live','Live — GitHub CSV connected');
+
+  }catch(err){
+    console.error(err);
+    showErr(err.message);
+    setPill('idle','CSV connection error');
+  }
+}
+
+// ── Auto refresh from GitHub ──────────────────────────────────
+setInterval(loadGitHubCSV, 60000);
+
+// ── Startup ───────────────────────────────────────────────────
+loadGitHubCSV();
+;
 </script>
 </body>
 </html>
