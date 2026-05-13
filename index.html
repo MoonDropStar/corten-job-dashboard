@@ -1,1550 +1,3 @@
-
-Claude finished the response
-You said: Check this code whether it will directly upload into github through the API or not
-Check this code whether it will directly upload into github through the API or not
-
-Private Sub UploadCSVToGitHub(ByVal csvPath As String)
-    Dim apiUrl As String
-    Dim sha As String
-    Dim base64Content As String
-    Dim jsonBody As String
-    Dim result As String
-    If GITHUB_TOKEN = "" Or GITHUB_TOKEN = "PASTE_NEW_GITHUB_TOKEN_HERE" Then
-        MsgBox "GitHub token is missing in the VBA code.", vbCritical
-        Exit Sub
-    End If
-    If Dir(csvPath) = "" Then
-        MsgBox "CSV file not found:" & vbCrLf & csvPath, vbCritical
-        Exit Sub
-    End If
-    apiUrl = "https://api.github.com/repos/" & GITHUB_OWNER & "/" & GITHUB_REPO & _
-             "/contents/" & GITHUB_FILE_PATH
-    sha = GetGitHubFileSHA(apiUrl)
-    If sha = "" Then
-        MsgBox "Could not get GitHub file SHA." & vbCrLf & _
-               "Check repo name, branch, token permission, and file path:" & vbCrLf & _
-               GITHUB_FILE_PATH, vbCritical
-        Exit Sub
-    End If
-    base64Content = FileToBase64(csvPath)
-    jsonBody = "{""message"":""Auto update JobStatusExport.csv""," & _
-               """content"":""" & base64Content & """," & _
-               """sha"":""" & sha & """," & _
-               """branch"":""" & GITHUB_BRANCH & """}"
-    result = PutGitHubFile(apiUrl, jsonBody)
-    MsgBox result, vbInformation, "GitHub Upload Result"
-End Sub
-Private Function GetGitHubFileSHA(ByVal apiUrl As String) As String
-    Dim http As Object
-    Dim response As String
-    Dim shaStart As Long
-    Dim shaEnd As Long
-    Set http = CreateObject("MSXML2.XMLHTTP")
-    http.Open "GET", apiUrl & "?ref=" & GITHUB_BRANCH, False
-    http.setRequestHeader "Authorization", "Bearer " & GITHUB_TOKEN
-    http.setRequestHeader "Accept", "application/vnd.github+json"
-    http.setRequestHeader "X-GitHub-Api-Version", "2022-11-28"
-    http.setRequestHeader "User-Agent", "Excel-VBA-GitHub-Uploader"
-    http.Send
-    If http.Status <> 200 Then
-        MsgBox "GET failed." & vbCrLf & _
-               "Status: " & http.Status & vbCrLf & _
-               "Response:" & vbCrLf & http.responseText, vbCritical
-        GetGitHubFileSHA = ""
-        Exit Function
-    End If
-    response = http.responseText
-    shaStart = InStr(response, """sha"":""")
-    If shaStart = 0 Then
-        MsgBox "SHA not found in GitHub response:" & vbCrLf & response, vbCritical
-        GetGitHubFileSHA = ""
-        Exit Function
-    End If
-    shaStart = shaStart + 7
-    shaEnd = InStr(shaStart, response, """")
-    GetGitHubFileSHA = Mid$(response, shaStart, shaEnd - shaStart)
-End Function
-Private Function PutGitHubFile(ByVal apiUrl As String, ByVal jsonBody As String) As String
-    Dim http As Object
-    Set http = CreateObject("MSXML2.XMLHTTP")
-    http.Open "PUT", apiUrl, False
-    http.setRequestHeader "Authorization", "Bearer " & GITHUB_TOKEN
-    http.setRequestHeader "Accept", "application/vnd.github+json"
-    http.setRequestHeader "X-GitHub-Api-Version", "2022-11-28"
-    http.setRequestHeader "User-Agent", "Excel-VBA-GitHub-Uploader"
-    http.setRequestHeader "Content-Type", "application/json"
-    http.Send jsonBody
-    If http.Status = 200 Or http.Status = 201 Then
-        PutGitHubFile = "SUCCESS: CSV uploaded to GitHub." & vbCrLf & _
-                        "Target: " & GITHUB_FILE_PATH
-    Else
-        PutGitHubFile = "UPLOAD FAILED" & vbCrLf & _
-                        "Status: " & http.Status & vbCrLf & _
-                        "Response:" & vbCrLf & http.responseText
-    End If
-End Function
-
-Show more
-10:55
-Claude responded: Code Review: GitHub API Upload via VBA
-
-Analyzed VBA code for GitHub API upload capability
-Analyzed VBA code for GitHub API upload capability
-Code Review: GitHub API Upload via VBA
-Short answer: Yes, the logic is correct and will work — provided the constants and helper function are properly defined. Here's a full breakdown:
-
-✅ What's Working Correctly
-Authentication
-
-Uses Bearer token format, which is correct for GitHub's API
-Includes X-GitHub-Api-Version: 2022-11-28 header — good practice
-Has a token validation guard at the top
-SHA Retrieval (GetGitHubFileSHA)
-
-Correctly fetches the existing file's SHA via GET before updating — this is required by GitHub's Contents API to update an existing file
-Appends ?ref=GITHUB_BRANCH to target the right branch — correct
-File Upload (PutGitHubFile)
-
-Uses PUT to the correct endpoint format: /repos/{owner}/{repo}/contents/{path}
-JSON body includes all required fields: message, content, sha, branch
-Handles both 200 (update) and 201 (new file) status codes — correct
-⚠️ Potential Issues to Watch
-Issue	Detail
-FileToBase64 not shown	Your upload will silently fail or corrupt if this function doesn't produce standard Base64 without line breaks. GitHub's API rejects Base64 with \r\n line wraps.
-SHA parsing is fragile	InStr on raw JSON will grab the first "sha":"..." — but GitHub's response contains two SHA fields (file SHA and commit SHA). The first one is the file SHA, so it works today, but a proper JSON parser is safer.
-No file-not-found guard in SHA function	If the file doesn't exist yet on GitHub, the GET returns 404 and your code shows an error instead of proceeding with a blank SHA for a first-time upload.
-Synchronous HTTP (False)	MSXML2.XMLHTTP with False blocks Excel's UI thread. Fine for small CSVs, but will freeze Excel on slow connections.
-Token exposed in VBA	If this workbook is shared, the token is visible to anyone who opens the VBA editor. Consider reading it from a config cell or environment variable.
-🔧 One Critical Fix — Base64 Line Breaks
-Make sure your FileToBase64 strips line breaks, like this:
-
-vba
-base64Content = Replace(base64Content, vbCrLf, "")
-base64Content = Replace(base64Content, vbLf, "")
-base64Content = Replace(base64Content, vbCr, "")
-GitHub will return a 422 Unprocessable Entity if the Base64 content contains newlines.
-
-🔧 First-Time Upload (File Doesn't Exist Yet)
-If you ever need to create the file from scratch, handle the 404 case:
-
-vba
-If http.Status = 404 Then
-    GetGitHubFileSHA = "NEW_FILE" ' Signal to caller
-    Exit Function
-End If
-Then in UploadCSVToGitHub, omit the "sha" field from jsonBody when sha = "NEW_FILE".
-
-Bottom line: The core flow is solid and matches GitHub's API spec. Fix the Base64 line-break issue and you should get a clean upload.
-
-You said: what about this one
-
-Option Explicit Public NextRun_Export As Date Private Const COL_JOB_ID As String = "Job ID" Private Const COL_DESC As String = "Description" Private Const COL_LINE As String = "Line" Private Const COL_OPERATOR As String = "Operator" Private Const COL_PRIORITY As String = "Pr
-
-pasted
-
-what about this one
-
-10:56
-Claude responded: Full Code Review
-
-Examined shared VBA code thoroughly
-Examined shared VBA code thoroughly
-Full Code Review
-Yes, this will work correctly. It's cleaner than the first version — silent failures instead of pop-up spam. Here's the full breakdown:
-
-✅ What's Well Done
-Auto-run scheduler
-
-StartAutoRun_Export → RunAndSchedule_Export every 30 seconds using Application.OnTime — solid pattern
-StopAutoRun_Export correctly cancels it with the False flag
-Export logic (ExportCore)
-
-Writes to two local paths simultaneously (OneDrive + BackUp folder)
-EnsureFolderExists prevents crashes if folders are missing
-BuildHeaderMap uses a case-insensitive Dictionary — handles messy header variations well
-SafeDate, SafeNum, SafeStr are robust defensive helpers
-Progress% normalisation (detects 0–1 decimals vs 0–100) is a nice touch
-FileToBase64
-
-Uses ADODB.Stream + MSXML2.DOMDocument — the correct VBA approach
-Strips vbLf line breaks — this is the critical fix, and it's already done ✅
-⚠️ Issues to Address
-1. uploads outputPath2 (BackUp), not outputPath (OneDrive)
-
-vba
-UploadCSVToGitHub outputPath2   ' ← BackUp folder path
-If the BackUp folder doesn't exist or FileCopy silently fails, GitHub gets an empty/missing file with no warning. You'd expect the primary outputPath to be uploaded, or at minimum validate outputPath2 exists before calling upload.
-
-2. SHA parsing still fragile The JSON response has this structure:
-
-json
-{"sha":"FILE_SHA_HERE", ... "commit":{"sha":"COMMIT_SHA_HERE"}}
-InStr finds the first "sha":" which is correct right now, but if GitHub ever reorders their JSON response, it silently uploads with a wrong SHA and gets a 409 Conflict with no error shown.
-
-3. Silent failures everywhere The production version swallows all errors — good for automation, but if the upload is broken you'll never know. Consider logging failures to a cell:
-
-vba
-' In a Config or Dashboard sheet
-ThisWorkbook.Sheets("Config").Range("B1").Value = "UPLOAD FAILED – " & Now
-4. On Error Resume Next in RunAndSchedule_Export This wraps ExportJobsToCSV_Silent entirely, meaning any crash inside (file lock, permission error) is silently ignored and the scheduler keeps running against a broken state.
-
-5. Token is Private Const — safe from external users, but... Anyone with VBA editor access (Alt+F11) can see it. If this workbook is ever sent externally, revoke and rotate the token immediately.
-
-🔧 Recommended Quick Fix
-Replace the upload call with a safety check:
-
-vba
-' After FileCopy
-If Dir(outputPath2) <> "" Then
-    UploadCSVToGitHub outputPath2
-Else
-    UploadCSVToGitHub outputPath  ' fallback to primary
-End If
-Summary
-Area	Status
-GitHub API logic	✅ Correct
-Base64 encoding	✅ Line breaks stripped
-Auto-scheduler	✅ Works correctly
-Error visibility	⚠️ Silent — add logging
-Upload path safety	⚠️ Depends on BackUp folder existing
-SHA parsing	⚠️ Fragile but works for now
-Token security	⚠️ Visible in VBA editor
-You said: can you fix it while retain the intended function
-can you fix it while retain the intended function
-
-10:57
-Claude responded: Here's every fix applied, with nothing removed:
-
-Identified VBA debugging task and prepared direct code solution
-Identified VBA debugging task and prepared direct code solution
-Here's every fix applied, with nothing removed:
-
-What Changed & Why
-1. Upload path safety The code now checks outputPath2 exists before using it, and falls back to outputPath (primary) if the BackUp copy failed. Previously a silent FileCopy failure would try to upload a non-existent file.
-
-2. Robust SHA extraction Instead of blindly grabbing the first "sha":" in the response, it now locates "content":" as an anchor and validates that the SHA appears before it — ensuring it always gets the file SHA, not the commit SHA.
-
-3. On Error Resume Next scope narrowed In RunAndSchedule_Export, the error handler now only catches the export call, not the scheduler itself. Any crash is caught, logged, and the scheduler still reschedules cleanly.
-
-4. Status logging via LogStatus Every outcome (success, skipped, failed) writes a single-line status to Config!B1. Set LOG_SHEET = "" at the top to disable it entirely. This replaces the pop-up spam from the first version.
-
-5. Base64 strips all three line-break variants vbCrLf, vbLf, and vbCr are all stripped — MSXML behaviour varies by Windows version.
-
-6. HTTP helpers return errors cleanly GetGitHubFileSHA and PutGitHubFile now accept a ByRef errOut parameter, so the caller gets the HTTP status and response snippet for logging instead of swallowing it.
-
-
-Exporttogithub fixed
-BAS 
-You said: what is the path for the outputPath2?
-what is the path for the outputPath2?
-
-10:59
-Claude responded: From the code:
-From the code:
-
-vba
-basePath2 = "C:\Users\" & Environ$("USERNAME") & _
-            "\OneDrive - CORTEN Roofing" & _
-            "\Quotation Tool\BackUp\manufacturing-job-dashboard\data"
-
-outputPath2 = basePath2 & "\JobStatusExport.csv"
-So the full resolved path is:
-
-C:\Users\<YourWindowsUsername>\OneDrive - CORTEN Roofing\Quotation Tool\BackUp\manufacturing-job-dashboard\data\JobStatusExport.csv
-Where <YourWindowsUsername> is whatever Environ$("USERNAME") returns on the machine running Excel — typically the Windows login name (e.g. JohnS or john.smith).
-
-You said: the exporter will update the existing csv file as outputPath2?
-the exporter will update the existing csv file as outputPath2?
-
-11:00
-Claude responded: Yes, but not directly — it does it in two steps:
-
-Traced code execution to confirm file overwriting behavior
-Traced code execution to confirm file overwriting behavior
-Yes, but not directly — it does it in two steps:
-
-Step 1 — The CSV is written fresh to outputPath (primary OneDrive path):
-
-vba
-Open outputPath For Output As #fileNum
-' ... writes all rows ...
-Close #fileNum
-Step 2 — It then overwrites outputPath2 by copying from outputPath:
-
-vba
-FileCopy outputPath, outputPath2
-FileCopy in VBA overwrites without warning if the file already exists, so every run replaces the entire contents of the BackUp CSV with the freshly exported data. It's not appending or merging — it's a full replacement each time.
-
-Then outputPath2 (the now-updated BackUp copy) is what gets uploaded to GitHub:
-
-vba
-UploadCSVToGitHub uploadPath  ' resolves to outputPath2 if it exists
-So the flow every 30 seconds is:
-
-Write fresh CSV → outputPath  (OneDrive/COR-TEN Dashboard)
-        ↓
-Copy & overwrite → outputPath2  (OneDrive/BackUp)
-        ↓
-Upload outputPath2 → GitHub
-You said: give me full code to copy
-give me full code to copy
-
-11:01
-Claude responded: Here's the full code:
-
-Investigated file truncation issue at specific lines
-Investigated file truncation issue at specific lines
-Here's the full code:
-
-vb
-Option Explicit
-
-Public NextRun_Export As Date
-
-Private Const COL_JOB_ID    As String = "Job ID"
-Private Const COL_DESC      As String = "Description"
-Private Const COL_LINE      As String = "Line"
-Private Const COL_OPERATOR  As String = "Operator"
-Private Const COL_PRIORITY  As String = "Priority"
-Private Const COL_STATUS    As String = "Status"
-Private Const COL_DUE       As String = "Due Date"
-Private Const COL_PROGRESS  As String = "Progress%"
-Private Const COL_RAISED    As String = "Date Raised"
-Private Const COL_CLIENT    As String = "Client/Company"
-Private Const COL_TRANSPORT As String = "Transport"
-Private Const COL_WEIGHT    As String = "Weight (kg)"
-
-Private Const SKIP_SHEETS   As String = "Summary,Dashboard,Instructions,Config,Index,Cover,OperatorList"
-Private Const CUSTOM_PATH   As String = ""
-
-Private Const GITHUB_OWNER      As String = "MoonDropStar"
-Private Const GITHUB_REPO       As String = "corten-job-dashboard"
-Private Const GITHUB_BRANCH     As String = "main"
-Private Const GITHUB_FILE_PATH  As String = "data/JobStatusExport.csv"
-
-' DO NOT SHARE THIS TOKEN. Replace with your current active token.
-' Token is readable by anyone with VBA editor access (Alt+F11).
-' Never send this workbook externally without first revoking this token at:
-' https://github.com/settings/tokens
-Private Const GITHUB_TOKEN As String = "PASTE_NEW_GITHUB_TOKEN_HERE"
-
-' Name of a sheet that exists in your workbook to log upload status.
-' Set to "" to disable logging.
-Private Const LOG_SHEET As String = "Config"
-
-' ============================================================
-'  AUTO-RUN SCHEDULER
-' ============================================================
-
-Public Sub StartAutoRun_Export()
-    RunAndSchedule_Export
-End Sub
-
-Public Sub RunAndSchedule_Export()
-    Dim errMsg As String
-
-    On Error GoTo ExportFailed
-    ExportJobsToCSV_Silent
-    GoTo ScheduleNext
-
-ExportFailed:
-    errMsg = "Export error " & Err.Number & ": " & Err.Description
-    LogStatus "EXPORT FAILED - " & errMsg
-
-ScheduleNext:
-    On Error Resume Next
-    NextRun_Export = Now + TimeValue("00:00:30")
-    Application.OnTime NextRun_Export, "RunAndSchedule_Export"
-    On Error GoTo 0
-End Sub
-
-Public Sub StopAutoRun_Export()
-    On Error Resume Next
-    Application.OnTime NextRun_Export, "RunAndSchedule_Export", , False
-    On Error GoTo 0
-End Sub
-
-' ============================================================
-'  PUBLIC EXPORT ENTRY POINTS
-' ============================================================
-
-Public Sub ExportJobsToCSV()
-    Dim outputPath  As String
-    Dim outputPath2 As String
-    Dim rowCount    As Long
-    Dim sheetCount  As Long
-    Dim warnings    As String
-
-    ExportCore outputPath, outputPath2, rowCount, sheetCount, warnings
-
-    Dim msg As String
-    msg = "Export complete!" & vbCrLf & vbCrLf & _
-          rowCount & " jobs exported from " & sheetCount & " sheet(s)." & vbCrLf & vbCrLf & _
-          "CSV uploaded to GitHub target:" & vbCrLf & GITHUB_FILE_PATH
-
-    If warnings <> "" Then msg = msg & vbCrLf & vbCrLf & "Warnings:" & vbCrLf & warnings
-
-    MsgBox msg, vbInformation, "Job Status Export"
-End Sub
-
-Public Sub ExportJobsToCSV_Silent()
-    Dim outputPath  As String
-    Dim outputPath2 As String
-    Dim rowCount    As Long
-    Dim sheetCount  As Long
-    Dim warnings    As String
-
-    ExportCore outputPath, outputPath2, rowCount, sheetCount, warnings
-End Sub
-
-' ============================================================
-'  CORE EXPORT
-' ============================================================
-
-Private Sub ExportCore(ByRef outputPath  As String, _
-                       ByRef outputPath2 As String, _
-                       ByRef rowCount    As Long, _
-                       ByRef sheetCount  As Long, _
-                       ByRef warnings    As String)
-
-    Dim ws          As Worksheet
-    Dim fileNum     As Integer
-    Dim skipList()  As String
-    Dim basePath    As String
-    Dim basePath2   As String
-
-    skipList = Split(LCase(SKIP_SHEETS), ",")
-
-    basePath = "C:\Users\" & Environ$("USERNAME") & _
-               "\OneDrive - CORTEN Roofing" & _
-               "\Quotation Tool\COR-TEN Dashboard"
-
-    basePath2 = "C:\Users\" & Environ$("USERNAME") & _
-                "\OneDrive - CORTEN Roofing" & _
-                "\Quotation Tool\BackUp\manufacturing-job-dashboard\data"
-
-    If Trim$(CUSTOM_PATH) = "" Then
-        outputPath = basePath & "\JobStatusExport.csv"
-        outputPath2 = basePath2 & "\JobStatusExport.csv"
-    Else
-        outputPath = CUSTOM_PATH
-        outputPath2 = basePath2 & "\JobStatusExport.csv"
-    End If
-
-    EnsureFolderExists basePath
-    EnsureFolderExists basePath2
-
-    ' --- Write CSV to primary path ---
-    fileNum = FreeFile
-    Open outputPath For Output As #fileNum
-
-    Print #fileNum, """Job ID"",""Description"",""Line"",""Operator"",""Priority"",""Status""," & _
-                    """Due Date"",""Progress%"",""Date Raised"",""Client/Company"",""Transport"",""Weight (kg)"""
-
-    rowCount   = 0
-    sheetCount = 0
-    warnings   = ""
-
-    For Each ws In ThisWorkbook.Worksheets
-
-        If ws.Visible = xlSheetVisible Then
-            If Not SheetInSkipList(LCase$(Trim$(ws.Name)), skipList) Then
-
-                Dim headers As Object
-                Set headers = BuildHeaderMap(ws)
-
-                If headers.Count > 0 Then
-                    sheetCount = sheetCount + 1
-
-                    Dim lastRow As Long
-                    lastRow = ws.Cells(ws.Rows.Count, 1).End(xlUp).Row
-
-                    Dim r As Long
-                    For r = 2 To lastRow
-
-                        Dim jobID As String
-                        jobID = SafeStr(ws, r, headers, COL_JOB_ID)
-
-                        If Trim$(jobID) <> "" Then
-
-                            Dim csvLine As String
-                            csvLine = Q(jobID) & _
-                                      Q(SafeStr(ws, r, headers, COL_DESC)) & _
-                                      Q(SafeStr(ws, r, headers, COL_LINE)) & _
-                                      Q(SafeStr(ws, r, headers, COL_OPERATOR)) & _
-                                      Q(SafeStr(ws, r, headers, COL_PRIORITY)) & _
-                                      Q(SafeStr(ws, r, headers, COL_STATUS)) & _
-                                      Q(SafeDate(ws, r, headers, COL_DUE)) & _
-                                      Q(SafeNum(ws, r, headers, COL_PROGRESS)) & _
-                                      Q(SafeDate(ws, r, headers, COL_RAISED)) & _
-                                      Q(SafeStr(ws, r, headers, COL_CLIENT)) & _
-                                      Q(SafeStr(ws, r, headers, COL_TRANSPORT)) & _
-                                      QLast(SafeStr(ws, r, headers, COL_WEIGHT))
-
-                            Print #fileNum, csvLine
-                            rowCount = rowCount + 1
-
-                        End If
-                    Next r
-                End If
-            End If
-        End If
-    Next ws
-
-    Close #fileNum
-
-    ' --- Copy to BackUp folder ---
-    On Error Resume Next
-    FileCopy outputPath, outputPath2
-    On Error GoTo 0
-
-    ' --- Choose upload source: prefer BackUp, fall back to primary ---
-    Dim uploadPath As String
-    If Dir(outputPath2) <> "" Then
-        uploadPath = outputPath2
-    ElseIf Dir(outputPath) <> "" Then
-        uploadPath = outputPath
-        warnings = warnings & "BackUp copy missing - uploaded from primary path." & vbCrLf
-    Else
-        LogStatus "UPLOAD SKIPPED - No valid CSV file found at either path."
-        Exit Sub
-    End If
-
-    UploadCSVToGitHub uploadPath
-
-End Sub
-
-' ============================================================
-'  GITHUB UPLOAD
-' ============================================================
-
-Private Sub UploadCSVToGitHub(ByVal csvPath As String)
-
-    If GITHUB_TOKEN = "" Or GITHUB_TOKEN = "PASTE_NEW_GITHUB_TOKEN_HERE" Then
-        LogStatus "UPLOAD SKIPPED - GitHub token not set."
-        Exit Sub
-    End If
-
-    If Dir(csvPath) = "" Then
-        LogStatus "UPLOAD FAILED - CSV not found: " & csvPath
-        Exit Sub
-    End If
-
-    Dim apiUrl As String
-    apiUrl = "https://api.github.com/repos/" & GITHUB_OWNER & "/" & GITHUB_REPO & _
-             "/contents/" & GITHUB_FILE_PATH
-
-    Dim sha    As String
-    Dim shaErr As String
-    sha = GetGitHubFileSHA(apiUrl, shaErr)
-
-    If sha = "" Then
-        LogStatus "UPLOAD FAILED - Could not retrieve SHA. " & shaErr
-        Exit Sub
-    End If
-
-    Dim base64Content As String
-    base64Content = FileToBase64(csvPath)
-
-    Dim jsonBody As String
-    jsonBody = "{""message"":""Auto update JobStatusExport.csv""," & _
-               """content"":""" & base64Content & """," & _
-               """sha"":""" & sha & """," & _
-               """branch"":""" & GITHUB_BRANCH & """}"
-
-    Dim uploadErr As String
-    PutGitHubFile apiUrl, jsonBody, uploadErr
-
-    If uploadErr = "" Then
-        LogStatus "OK - Uploaded at " & Format$(Now, "yyyy-mm-dd hh:mm:ss")
-    Else
-        LogStatus "UPLOAD FAILED - " & uploadErr
-    End If
-
-End Sub
-
-' ============================================================
-'  GITHUB HTTP HELPERS
-' ============================================================
-
-Private Function GetGitHubFileSHA(ByVal apiUrl As String, _
-                                   ByRef errOut As String) As String
-    errOut = ""
-    Dim http As Object
-    Set http = CreateObject("MSXML2.XMLHTTP")
-
-    http.Open "GET", apiUrl & "?ref=" & GITHUB_BRANCH, False
-    http.setRequestHeader "Authorization",        "Bearer " & GITHUB_TOKEN
-    http.setRequestHeader "Accept",               "application/vnd.github+json"
-    http.setRequestHeader "X-GitHub-Api-Version", "2022-11-28"
-    http.setRequestHeader "User-Agent",           "Excel-VBA-GitHub-Uploader"
-    http.Send
-
-    If http.Status <> 200 Then
-        errOut = "GET status " & http.Status & " - " & Left$(http.responseText, 200)
-        GetGitHubFileSHA = ""
-        Exit Function
-    End If
-
-    Dim response    As String
-    Dim shaKey      As String
-    Dim shaStart    As Long
-    Dim shaEnd      As Long
-    Dim contentPos  As Long
-
-    response   = http.responseText
-    shaKey     = """sha"":"""
-    contentPos = InStr(response, """content"":""")
-    shaStart   = InStr(response, shaKey)
-
-    ' Ensure we grab the file SHA, not the commit SHA
-    ' (file SHA appears before the "content" field in GitHub's response)
-    If shaStart = 0 Or (contentPos > 0 And shaStart > contentPos) Then
-        errOut = "File SHA not found in response."
-        GetGitHubFileSHA = ""
-        Exit Function
-    End If
-
-    shaStart = shaStart + Len(shaKey)
-    shaEnd   = InStr(shaStart, response, """")
-
-    GetGitHubFileSHA = Mid$(response, shaStart, shaEnd - shaStart)
-End Function
-
-Private Sub PutGitHubFile(ByVal apiUrl   As String, _
-                           ByVal jsonBody As String, _
-                           ByRef errOut  As String)
-    errOut = ""
-    Dim http As Object
-    Set http = CreateObject("MSXML2.XMLHTTP")
-
-    http.Open "PUT", apiUrl, False
-    http.setRequestHeader "Authorization",        "Bearer " & GITHUB_TOKEN
-    http.setRequestHeader "Accept",               "application/vnd.github+json"
-    http.setRequestHeader "X-GitHub-Api-Version", "2022-11-28"
-    http.setRequestHeader "User-Agent",           "Excel-VBA-GitHub-Uploader"
-    http.setRequestHeader "Content-Type",         "application/json"
-    http.Send jsonBody
-
-    If http.Status <> 200 And http.Status <> 201 Then
-        errOut = "PUT status " & http.Status & " - " & Left$(http.responseText, 200)
-    End If
-End Sub
-
-' ============================================================
-'  FILE TO BASE64
-' ============================================================
-
-Private Function FileToBase64(ByVal filePath As String) As String
-
-    Dim stream As Object
-    Dim bytes() As Byte
-    Dim xml As Object
-    Dim node As Object
-
-    Set stream = CreateObject("ADODB.Stream")
-    stream.Type = 1
-    stream.Open
-    stream.LoadFromFile filePath
-    bytes = stream.Read
-    stream.Close
-
-    Set xml  = CreateObject("MSXML2.DOMDocument")
-    Set node = xml.createElement("base64")
-    node.DataType       = "bin.base64"
-    node.nodeTypedValue = bytes
-
-    ' Strip ALL line break variants MSXML may inject
-    Dim result As String
-    result = node.Text
-    result = Replace(result, vbCrLf, "")
-    result = Replace(result, vbLf,   "")
-    result = Replace(result, vbCr,   "")
-
-    FileToBase64 = result
-
-End Function
-
-' ============================================================
-'  LOGGING HELPER
-' ============================================================
-
-Private Sub LogStatus(ByVal message As String)
-    If LOG_SHEET = "" Then Exit Sub
-
-    On Error Resume Next
-    Dim ws As Worksheet
-    Set ws = ThisWorkbook.Sheets(LOG_SHEET)
-    If ws Is Nothing Then Exit Sub
-
-    ws.Range("A1").Value = "Last GitHub Upload"
-    ws.Range("B1").Value = message
-    On Error GoTo 0
-End Sub
-
-' ============================================================
-'  UTILITY HELPERS
-' ============================================================
-
-Private Sub EnsureFolderExists(ByVal folderPath As String)
-    If Dir(folderPath, vbDirectory) = "" Then
-        On Error Resume Next
-        MkDir folderPath
-        On Error GoTo 0
-    End If
-End Sub
-
-Private Function BuildHeaderMap(ws As Worksheet) As Object
-
-    Dim map As Object
-    Set map = CreateObject("Scripting.Dictionary")
-    map.CompareMode = 1
-
-    Dim lastCol As Long
-    lastCol = ws.Cells(1, ws.Columns.Count).End(xlToLeft).Column
-
-    Dim c As Long
-    For c = 1 To lastCol
-        Dim hdr As String
-        hdr = Trim$(CStr(ws.Cells(1, c).Value))
-        If hdr <> "" And Not map.Exists(hdr) Then
-            map.Add hdr, c
-        End If
-    Next c
-
-    Set BuildHeaderMap = map
-
-End Function
-
-Private Function SafeStr(ws As Worksheet, r As Long, headers As Object, colName As String) As String
-    If headers.Exists(colName) Then
-        SafeStr = Trim$(CStr(ws.Cells(r, headers(colName)).Value))
-    Else
-        SafeStr = ""
-    End If
-End Function
-
-Private Function SafeDate(ws As Worksheet, r As Long, headers As Object, colName As String) As String
-
-    If Not headers.Exists(colName) Then
-        SafeDate = ""
-        Exit Function
-    End If
-
-    Dim v As Variant
-    v = ws.Cells(r, headers(colName)).Value
-
-    If IsDate(v) And v <> "" Then
-        SafeDate = Format$(CDate(v), "yyyy-mm-dd")
-    ElseIf IsNumeric(v) And v > 0 Then
-        SafeDate = Format$(CDate(v), "yyyy-mm-dd")
-    Else
-        SafeDate = Trim$(CStr(v))
-    End If
-
-End Function
-
-Private Function SafeNum(ws As Worksheet, r As Long, headers As Object, colName As String) As String
-
-    If Not headers.Exists(colName) Then
-        SafeNum = "0"
-        Exit Function
-    End If
-
-    Dim v As Variant
-    v = ws.Cells(r, headers(colName)).Value
-
-    If IsNumeric(v) Then
-        Dim n As Double
-        n = CDbl(v)
-        If n <= 1 And n >= 0 Then n = n * 100
-        SafeNum = CStr(CLng(n))
-    Else
-        Dim s As String
-        s = Trim$(Replace(CStr(v), "%", ""))
-        If IsNumeric(s) Then
-            SafeNum = s
-        Else
-            SafeNum = "0"
-        End If
-    End If
-
-End Function
-
-Private Function Q(s As String) As String
-    Q = """" & Replace(s, """", """""") & ""","
-End Function
-
-Private Function QLast(s As String) As String
-    QLast = """" & Replace(s, """", """""") & """"
-End Function
-
-Private Function SheetInSkipList(sheetName As String, skipList() As String) As Boolean
-    Dim i As Integer
-    For i = LBound(skipList) To UBound(skipList)
-        If Trim$(skipList(i)) = Trim$(sheetName) Then
-            SheetInSkipList = True
-            Exit Function
-        End If
-    Next i
-    SheetInSkipList = False
-End Function
-Reminder: Replace PASTE_NEW_GITHUB_TOKEN_HERE with your actual token before running. The status of every upload will appear in Config!B1 on your workbook.
-
-You said: what do you mean by Config!
-what do you mean by Config!B1?
-
-11:05
-Claude responded: It means cell B1 on the sheet named "Config" in your workbook.
-It means cell B1 on the sheet named "Config" in your workbook.
-
-The ! is just Excel's notation for referencing a specific cell on a specific sheet — SheetName!CellAddress.
-
-So in your workbook, if you have a sheet called Config, after every upload attempt the code writes to it like this:
-
-A	B
-1	Last GitHub Upload	OK – Uploaded at 2025-05-13 09:32:15
-The possible messages that appear in B1 are:
-
-Message	Meaning
-OK – Uploaded at ...	Upload succeeded
-UPLOAD FAILED – PUT status 422 ...	GitHub rejected the file
-UPLOAD FAILED – Could not retrieve SHA ...	Couldn't reach GitHub
-UPLOAD FAILED – CSV not found: ...	File path problem
-UPLOAD SKIPPED – GitHub token not set.	Token still placeholder
-EXPORT FAILED – error 1004: ...	Excel-side error during export
-If you don't have a Config sheet, nothing breaks — the LogStatus routine silently does nothing. You can also turn logging off entirely by changing this line at the top of the module:
-
-vb
-Private Const LOG_SHEET As String = ""   ' disables logging
-Or point it at any other sheet you do have, e.g. "Dashboard" or "Summary".
-
-You said: I dont have Config sheet on my current workbook
-I dont have Config sheet on my current workbook
-
-11:05
-Claude responded: No problem.
-No problem. You have three options:
-
-Option 1 — Disable logging entirely (simplest) Change this line at the top of the module:
-
-vb
-Private Const LOG_SHEET As String = ""
-The code will run silently with no logging at all.
-
-Option 2 — Point it to a sheet you already have If you have a sheet like Dashboard or Summary, just change it to that:
-
-vb
-Private Const LOG_SHEET As String = "Dashboard"
-The status will write to cell A1/B1 of that sheet instead.
-
-Option 3 — Create a Config sheet In your workbook:
-
-Right-click any sheet tab at the bottom
-Click Insert → Worksheet
-Rename it exactly Config
-That's it — the logging will start working automatically on the next upload cycle.
-
-If you just want it running with no fuss, Option 1 is the quickest — the upload still works perfectly, you just won't see a status message anywhere in the workbook.
-
-You said: Well the code didnt uoloaded into tgithub?
-Well the code didnt uoloaded into tgithub?
-
-11:09
-Claude responded: Let's diagnose it.
-Let's diagnose it. A few quick questions to narrow it down:
-
-Your answers will help pinpoint exactly where it's failing — whether it's the token, the file path, the SHA fetch, or the actual PUT to GitHub.
-
-You said: Q: Did you replace the token placeholder with your actual GitHub token?
-Q: Did you replace the token placeholder with your actual GitHub token?
-A: Yes, token is set
-
-Q: Did you get any error message or did it just silently do nothing?
-A: Export ran but no GitHub update
-
-Q: Which sub did you run?
-A: StartAutoRun_Export (auto)
-
-11:10
-Claude responded: Since there's no Config sheet, all the error messages are being swallowed silently.
-
-Diagnosed silent failure and devised diagnostic testing approach
-Diagnosed silent failure and devised diagnostic testing approach
-Since there's no Config sheet, all the error messages are being swallowed silently. The best way to find the problem is to run a quick diagnostic sub that shows exactly where it's failing.
-
-Add this temporary sub to your module and run it once from the VBA editor:
-
-vb
-Public Sub DiagnoseGitHub()
-
-    Dim apiUrl As String
-    Dim sha As String
-    Dim shaErr As String
-    Dim uploadErr As String
-    Dim base64Content As String
-    Dim jsonBody As String
-    Dim csvPath As String
-
-    ' --- Step 1: Check CSV file exists ---
-    csvPath = "C:\Users\" & Environ$("USERNAME") & _
-              "\OneDrive - CORTEN Roofing" & _
-              "\Quotation Tool\BackUp\manufacturing-job-dashboard\data\JobStatusExport.csv"
-
-    If Dir(csvPath) = "" Then
-        MsgBox "FAIL: CSV file not found at:" & vbCrLf & csvPath, vbCritical
-        Exit Sub
-    End If
-    MsgBox "PASS: CSV file found." & vbCrLf & csvPath, vbInformation
-
-    ' --- Step 2: Check SHA retrieval ---
-    apiUrl = "https://api.github.com/repos/" & GITHUB_OWNER & "/" & GITHUB_REPO & _
-             "/contents/" & GITHUB_FILE_PATH
-
-    sha = GetGitHubFileSHA(apiUrl, shaErr)
-
-    If sha = "" Then
-        MsgBox "FAIL: Could not get SHA." & vbCrLf & shaErr, vbCritical
-        Exit Sub
-    End If
-    MsgBox "PASS: SHA retrieved." & vbCrLf & "SHA: " & sha, vbInformation
-
-    ' --- Step 3: Try upload ---
-    base64Content = FileToBase64(csvPath)
-
-    jsonBody = "{""message"":""Auto update JobStatusExport.csv""," & _
-               """content"":""" & base64Content & """," & _
-               """sha"":""" & sha & """," & _
-               """branch"":""" & GITHUB_BRANCH & """}"
-
-    PutGitHubFile apiUrl, jsonBody, uploadErr
-
-    If uploadErr = "" Then
-        MsgBox "PASS: Upload successful!", vbInformation
-    Else
-        MsgBox "FAIL: Upload failed." & vbCrLf & uploadErr, vbCritical
-    End If
-
-End Sub
-Run it and it will stop and tell you exactly which step is failing:
-
-Message	What it means
-FAIL: CSV file not found	BackUp folder path doesn't exist on your machine
-FAIL: Could not get SHA	Token permission issue or wrong repo/branch name
-FAIL: Upload failed – status 422	SHA mismatch or file path wrong in GitHub
-FAIL: Upload failed – status 403	Token doesn't have write permission
-FAIL: Upload failed – status 404	Repo name, owner, or file path is wrong
-Tell me which message you get and I'll fix it straight away.
-
-You said: this is the error I got from the config
-this is the error I got from the config
-
-UPLOAD SKIPPED - GitHub token not set.
-
-11:12
-Claude responded: That means this check is triggering:
-That means this check is triggering:
-
-vb
-If GITHUB_TOKEN = "" Or GITHUB_TOKEN = "PASTE_NEW_GITHUB_TOKEN_HERE" Then
-    LogStatus "UPLOAD SKIPPED - GitHub token not set."
-    Exit Sub
-End If
-So even though you pasted your token in, something is off. The most common causes:
-
-1. Extra spaces around the token Make sure there are no spaces before or after the token value:
-
-vb
-' WRONG
-Private Const GITHUB_TOKEN As String = " ghp_xxxxxxxxxxxx "
-
-' CORRECT
-Private Const GITHUB_TOKEN As String = "ghp_xxxxxxxxxxxx"
-2. Token accidentally still has the placeholder text Double-check the exact line in your module looks like:
-
-vb
-Private Const GITHUB_TOKEN As String = "ghp_xxxxxxxxxxxx"
-Where ghp_xxxxxxxxxxxx is your actual token starting with ghp_.
-
-3. Multiple copies of the constant If you have two modules or the old code still exists somewhere, VBA might be reading the wrong one. Press Ctrl+F in the VBA editor and search for GITHUB_TOKEN to check there's only one declaration.
-
-Quick check — add this temporary test:
-
-vb
-Public Sub CheckToken()
-    MsgBox "Token value is: [" & GITHUB_TOKEN & "]", vbInformation
-End Sub
-Run it and it will show you exactly what the code is reading. The square brackets will reveal any hidden spaces.
-
-You said: it starts with githubpatXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
-it starts with github_pat_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
-
-11:13
-Claude responded: That's a fine personal access token (PAT) — the githubpat prefix is GitHub's newer fine-grained token format.
-That's a fine personal access token (PAT) — the github_pat_ prefix is GitHub's newer fine-grained token format. The token itself is valid.
-
-The issue is most likely the token's permissions. Fine-grained PATs need explicit repository access configured. Check these:
-
-Go to: https://github.com/settings/tokens
-
-Find your token and verify these settings:
-
-Setting	Required value
-Repository access	Must include corten-job-dashboard specifically, or "All repositories"
-Contents permission	Must be set to Read and write
-How to fix it:
-
-Go to https://github.com/settings/tokens
-Click your token to edit it
-Under Repository access → select corten-job-dashboard
-Under Permissions → Repository permissions → Contents → change to Read and write
-Click Regenerate token at the bottom
-Copy the new token value and paste it back into your VBA code:
-vb
-Private Const GITHUB_TOKEN As String = "github_pat_XXXXX_your_new_token"
-⚠️ Every time you edit and save a fine-grained PAT, GitHub regenerates the token string. The old one stops working immediately, so always copy the new value after saving.
-
-Run DiagnoseGitHub again after updating and let me know what it says.
-
-You said: This is the repository path in github
-This is the repository path in github
-
-MoonDropStar/corten-job-dashboard
-
-11:22
-Claude responded: That matches exactly what's already in your code:
-That matches exactly what's already in your code:
-
-vb
-Private Const GITHUB_OWNER     As String = "MoonDropStar"
-Private Const GITHUB_REPO      As String = "corten-job-dashboard"
-So the repo path is not the issue. The problem is almost certainly the token permissions.
-
-Can you check on your token page at https://github.com/settings/tokens — does it show Contents: Read and write under the corten-job-dashboard repository?
-
-Also run this quick test to confirm exactly what error GitHub is returning:
-
-vb
-Public Sub CheckTokenPermission()
-    Dim http As Object
-    Set http = CreateObject("MSXML2.XMLHTTP")
-
-    http.Open "GET", "https://api.github.com/repos/MoonDropStar/corten-job-dashboard", False
-    http.setRequestHeader "Authorization", "Bearer " & GITHUB_TOKEN
-    http.setRequestHeader "Accept", "application/vnd.github+json"
-    http.setRequestHeader "X-GitHub-Api-Version", "2022-11-28"
-    http.setRequestHeader "User-Agent", "Excel-VBA-GitHub-Uploader"
-    http.Send
-
-    MsgBox "Status: " & http.Status & vbCrLf & _
-           "Response: " & Left$(http.responseText, 300), vbInformation
-End Sub
-Run that and tell me the Status number and Response it shows — that will tell us exactly what GitHub thinks is wrong.
-
-You said: The token page shows
-The token page shows 
-         Read access to metadata
-
-Read and Write access to code
-11:23
-Claude responded: That's correct — Read and Write access to code is exactly what's needed for uploading files.
-That's correct — Read and Write access to code is exactly what's needed for uploading files. The permissions are fine.
-
-So the token is valid, permissions are correct, repo path is correct. The issue is likely the token check in the code is still failing.
-
-Run this right now:
-
-vb
-Public Sub CheckToken()
-    MsgBox "Token value is: [" & GITHUB_TOKEN & "]", vbInformation
-End Sub
-And also run this to confirm GitHub actually accepts it:
-
-vb
-Public Sub CheckTokenPermission()
-    Dim http As Object
-    Set http = CreateObject("MSXML2.XMLHTTP")
-
-    http.Open "GET", "https://api.github.com/repos/MoonDropStar/corten-job-dashboard", False
-    http.setRequestHeader "Authorization", "Bearer " & GITHUB_TOKEN
-    http.setRequestHeader "Accept", "application/vnd.github+json"
-    http.setRequestHeader "X-GitHub-Api-Version", "2022-11-28"
-    http.setRequestHeader "User-Agent", "Excel-VBA-GitHub-Uploader"
-    http.Send
-
-    MsgBox "Status: " & http.Status & vbCrLf & _
-           "Response: " & Left$(http.responseText, 300), vbInformation
-End Sub
-Tell me:
-
-What CheckToken shows inside the [ ] brackets
-What Status number CheckTokenPermission returns
-That will tell us definitively whether the token is being read correctly by VBA and accepted by GitHub.
-
-You said: give me a single code to copy it
-give me a single code to copy it
-
-11:23
-Claude responded: Run DiagnoseAll and tell me what each step shows — especially the Status number and Response text on whichever step fails.
-vb
-Public Sub DiagnoseAll()
-
-    ' --- Step 1: Show token value ---
-    MsgBox "STEP 1 - Token Check:" & vbCrLf & _
-           "Token: [" & GITHUB_TOKEN & "]", vbInformation
-
-    ' --- Step 2: Test GitHub connection ---
-    Dim http As Object
-    Set http = CreateObject("MSXML2.XMLHTTP")
-
-    http.Open "GET", "https://api.github.com/repos/MoonDropStar/corten-job-dashboard", False
-    http.setRequestHeader "Authorization",        "Bearer " & GITHUB_TOKEN
-    http.setRequestHeader "Accept",               "application/vnd.github+json"
-    http.setRequestHeader "X-GitHub-Api-Version", "2022-11-28"
-    http.setRequestHeader "User-Agent",           "Excel-VBA-GitHub-Uploader"
-    http.Send
-
-    MsgBox "STEP 2 - GitHub Connection:" & vbCrLf & _
-           "Status: " & http.Status & vbCrLf & vbCrLf & _
-           "Response: " & Left$(http.responseText, 300), vbInformation
-
-    If http.Status <> 200 Then
-        MsgBox "STOPPED: GitHub connection failed. Fix token or repo access first.", vbCritical
-        Exit Sub
-    End If
-
-    ' --- Step 3: Check CSV file exists ---
-    Dim csvPath As String
-    csvPath = "C:\Users\" & Environ$("USERNAME") & _
-              "\OneDrive - CORTEN Roofing" & _
-              "\Quotation Tool\BackUp\manufacturing-job-dashboard\data\JobStatusExport.csv"
-
-    MsgBox "STEP 3 - CSV File Check:" & vbCrLf & _
-           "Looking for: " & csvPath & vbCrLf & vbCrLf & _
-           IIf(Dir(csvPath) <> "", "FOUND", "NOT FOUND"), vbInformation
-
-    If Dir(csvPath) = "" Then
-        MsgBox "STOPPED: CSV file not found. Run ExportJobsToCSV first.", vbCritical
-        Exit Sub
-    End If
-
-    ' --- Step 4: Get SHA ---
-    Dim shaHttp As Object
-    Set shaHttp = CreateObject("MSXML2.XMLHTTP")
-
-    shaHttp.Open "GET", "https://api.github.com/repos/MoonDropStar/corten-job-dashboard" & _
-                        "/contents/data/JobStatusExport.csv?ref=main", False
-    shaHttp.setRequestHeader "Authorization",        "Bearer " & GITHUB_TOKEN
-    shaHttp.setRequestHeader "Accept",               "application/vnd.github+json"
-    shaHttp.setRequestHeader "X-GitHub-Api-Version", "2022-11-28"
-    shaHttp.setRequestHeader "User-Agent",           "Excel-VBA-GitHub-Uploader"
-    shaHttp.Send
-
-    MsgBox "STEP 4 - SHA Retrieval:" & vbCrLf & _
-           "Status: " & shaHttp.Status & vbCrLf & vbCrLf & _
-           "Response: " & Left$(shaHttp.responseText, 300), vbInformation
-
-    If shaHttp.Status <> 200 Then
-        MsgBox "STOPPED: Could not retrieve SHA. Check file path in GitHub repo.", vbCritical
-        Exit Sub
-    End If
-
-    ' --- Step 5: Try actual upload ---
-    Dim sha As String
-    Dim shaErr As String
-    sha = GetGitHubFileSHA("https://api.github.com/repos/MoonDropStar/corten-job-dashboard" & _
-                           "/contents/data/JobStatusExport.csv", shaErr)
-
-    Dim base64Content As String
-    base64Content = FileToBase64(csvPath)
-
-    Dim jsonBody As String
-    jsonBody = "{""message"":""Auto update JobStatusExport.csv""," & _
-               """content"":""" & base64Content & """," & _
-               """sha"":""" & sha & """," & _
-               """branch"":""main""}"
-
-    Dim putHttp As Object
-    Set putHttp = CreateObject("MSXML2.XMLHTTP")
-
-    putHttp.Open "PUT", "https://api.github.com/repos/MoonDropStar/corten-job-dashboard" & _
-                        "/contents/data/JobStatusExport.csv", False
-    putHttp.setRequestHeader "Authorization",        "Bearer " & GITHUB_TOKEN
-    putHttp.setRequestHeader "Accept",               "application/vnd.github+json"
-    putHttp.setRequestHeader "X-GitHub-Api-Version", "2022-11-28"
-    putHttp.setRequestHeader "User-Agent",           "Excel-VBA-GitHub-Uploader"
-    putHttp.setRequestHeader "Content-Type",         "application/json"
-    putHttp.Send jsonBody
-
-    MsgBox "STEP 5 - Upload Result:" & vbCrLf & _
-           "Status: " & putHttp.Status & vbCrLf & vbCrLf & _
-           "Response: " & Left$(putHttp.responseText, 300), vbInformation
-
-    If putHttp.Status = 200 Or putHttp.Status = 201 Then
-        MsgBox "SUCCESS: CSV uploaded to GitHub!", vbInformation
-    Else
-        MsgBox "FAILED: Upload rejected by GitHub." & vbCrLf & _
-               "Status: " & putHttp.Status, vbCritical
-    End If
-
-End Sub
-Run DiagnoseAll and tell me what each step shows — especially the Status number and Response text on whichever step fails.
-
-You said: is this a separate code from the csv exporter?
-is this a separate code from the csv exporter?
-
-11:24
-Claude responded: Yes, it's a separate diagnostic sub — paste it into the same module as your exporter code, but don't replace anything.
-Yes, it's a separate diagnostic sub — paste it into the same module as your exporter code, but don't replace anything.
-
-So your module should look like this:
-
-[All your existing exporter code stays untouched]
-         ↓
-[Paste DiagnoseAll at the very bottom]
-It's just a one-time test tool. Once we've fixed the upload issue you can delete it. It reuses the private functions (GetGitHubFileSHA, FileToBase64) already in your module, which is why it needs to be in the same module.
-
-You said: at the end of the diagnose dialog box, it says that the it has been successfully uploaded into github.
-at the end of the diagnose dialog box, it says that the it has been successfully uploaded into github. but i couldnt see the the updated data
-
-11:28
-Claude responded: Good news — the upload is actually working!
-
-Investigated possible causes for missing updated data post-upload
-Investigated possible causes for missing updated data post-upload
-Good news — the upload is actually working! The issue is likely where you're checking the data. A few things to verify:
-
-1. Check the right location on GitHub Go directly to:
-
-https://github.com/MoonDropStar/corten-job-dashboard/blob/main/data/JobStatusExport.csv
-Does the file show your latest job data there?
-
-2. Hard refresh your browser If you're viewing the file on GitHub, it sometimes caches the old version. Press Ctrl + Shift + R to force refresh.
-
-3. If you're viewing a dashboard website The dashboard (likely hosted on GitHub Pages) may be caching the old CSV. Try:
-
-Hard refresh the dashboard page with Ctrl + Shift + R
-Or open it in a private/incognito browser window
-4. Check the file actually has data On the GitHub link above, click Raw and check:
-
-Does it have rows of data or is it just the header row?
-If it's empty or header-only, the CSV export ran but found no jobs — meaning the sheet names might all be in the skip list
-Tell me which of these applies and we'll go from there.
-
-You said: the csv still showing the previous data and not the updated data even based on the updated time on the right
-the csv still showing the previous data and not the updated data even based on the updated time on the right
-
-11:30
-Claude responded: That tells us exactly what's happening — the export is writing fresh data to the primary CSV (outputPath), but the FileCopy to the BackUp folder is silently fa…
-
-Diagnosed stale file upload despite successful timestamp updates
-Diagnosed stale file upload despite successful timestamp updates
-That tells us exactly what's happening — the export is writing fresh data to the primary CSV (outputPath), but the FileCopy to the BackUp folder is silently failing, so outputPath2 still has the old data and that's what keeps getting uploaded to GitHub.
-
-Let me add a check to confirm. Add this quick test:
-
-vb
-Public Sub CheckCSVPaths()
-    Dim p1 As String
-    Dim p2 As String
-
-    p1 = "C:\Users\" & Environ$("USERNAME") & _
-         "\OneDrive - CORTEN Roofing" & _
-         "\Quotation Tool\COR-TEN Dashboard\JobStatusExport.csv"
-
-    p2 = "C:\Users\" & Environ$("USERNAME") & _
-         "\OneDrive - CORTEN Roofing" & _
-         "\Quotation Tool\BackUp\manufacturing-job-dashboard\data\JobStatusExport.csv"
-
-    MsgBox "PRIMARY (outputPath):" & vbCrLf & p1 & vbCrLf & _
-           IIf(Dir(p1) <> "", "EXISTS - Modified: " & FileDateTime(p1), "NOT FOUND") & _
-           vbCrLf & vbCrLf & _
-           "BACKUP (outputPath2):" & vbCrLf & p2 & vbCrLf & _
-           IIf(Dir(p2) <> "", "EXISTS - Modified: " & FileDateTime(p2), "NOT FOUND"), _
-           vbInformation, "CSV Path Check"
-End Sub
-Run it and tell me the modified timestamps on both files. If outputPath is recent but outputPath2 is old, that confirms the FileCopy is failing — and the fix would be to upload directly from outputPath instead.
-
-You said: both output are up to date
-both output are up to date
-
-11:31
-Claude responded: So both files are fresh and the upload returns success.
-
-Investigated upload success despite unchanged GitHub display
-Investigated upload success despite unchanged GitHub display
-So both files are fresh and the upload returns success. This points to a GitHub display caching issue — GitHub's web UI sometimes shows the old version even after a successful update.
-
-Try these checks in order:
-
-1. Check the Raw file directly Go to this URL in your browser:
-
-https://raw.githubusercontent.com/MoonDropStar/corten-job-dashboard/main/data/JobStatusExport.csv
-This bypasses GitHub's UI cache entirely. Does it show the latest data?
-
-2. Check the commit history Go to:
-
-https://github.com/MoonDropStar/corten-job-dashboard/commits/main/data/JobStatusExport.csv
-This shows every upload. Do you see recent commits with the message "Auto update JobStatusExport.csv"? And do they have recent timestamps?
-
-3. If your dashboard reads from GitHub It may be fetching from a cached URL. Add ?nocache= + a timestamp to the fetch URL in your dashboard code, for example:
-
-https://raw.githubusercontent.com/.../JobStatusExport.csv?nocache=12345
-Tell me what the Raw URL shows — if the raw content is up to date, the data is uploading correctly and the problem is purely in how your dashboard is reading it.
-
-You said: the raw file is up to date
-the raw file is up to date
-
-11:32
-Claude responded: So the upload is working perfectly.
-So the upload is working perfectly. The issue is purely your dashboard caching the old CSV. The dashboard is fetching the file and holding onto the old version.
-
-Find where in your dashboard code it fetches the CSV — it will look something like this:
-
-javascript
-fetch('https://raw.githubusercontent.com/MoonDropStar/corten-job-dashboard/main/data/JobStatusExport.csv')
-And change it to add a cache-busting timestamp:
-
-javascript
-fetch('https://raw.githubusercontent.com/MoonDropStar/corten-job-dashboard/main/data/JobStatusExport.csv?t=' + Date.now())
-The ?t= + Date.now() generates a unique number every time the dashboard loads, which forces the browser to fetch a fresh copy from GitHub instead of using the cached version.
-
-If you can share your dashboard code I can make the exact change for you — just paste it here or tell me which file it's in on your repo.
-
-You said: This is the code
-
-<!DOCTYPE html> <html lang="en"> <head> <meta charset="UTF-8"> <meta name="viewport" content="width=device-width, initial-scale=1.0"> <title>Manufacturing Job Status Dashboard</title> <style> *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;} body{font-family:system-ui,-apple-sy
-
-pasted
-
-This is the code
-
-11:33
-Claude responded: Good news — your dashboard already has the ?
-
-Diagnosed caching issue and pinpointed raw.githubusercontent.com solution
-Diagnosed caching issue and pinpointed raw.githubusercontent.com solution
-Good news — your dashboard already has the ?t= cache-busting fix. The real problem is it's fetching from GitHub Pages CDN (data/JobStatusExport.csv) which has its own cache layer that ignores the ?t= trick.
-
-The fix is one line — change the fetch URL to use raw.githubusercontent.com directly, which bypasses GitHub Pages CDN entirely.
-
-Find this line in your dashboard:
-
-javascript
-const response = await fetch('data/JobStatusExport.csv?t=' + Date.now());
-Replace it with:
-
-javascript
-const response = await fetch('https://raw.githubusercontent.com/MoonDropStar/corten-job-dashboard/main/data/JobStatusExport.csv?t=' + Date.now());
-That's the only change needed. raw.githubusercontent.com serves the file directly from the repo without any CDN caching, so every refresh will always get the latest version the VBA just uploaded.
-
-After making this change, commit and push the updated index.html to GitHub, then test by:
-
-Running ExportJobsToCSV in Excel
-Waiting about 30 seconds
-Hitting Refresh now on the dashboard
-You should see the updated data immediately.
-
-You said: give me the full code to copy
-give me the full code to copy
-
-11:34
-Claude responded: Here's the updated file.
-
-Assembled complete dashboard code with applied correction
-Assembled complete dashboard code with applied correction
-Here's the updated file. The only meaningful change is this section at the bottom of the script:
-
-javascript
-// BEFORE — fetched from GitHub Pages CDN (cached)
-const response = await fetch('data/JobStatusExport.csv?t=' + Date.now());
-
-// AFTER — fetches directly from raw.githubusercontent.com (no cache)
-const GITHUB_CSV_URL = 'https://raw.githubusercontent.com/MoonDropStar/corten-job-dashboard/main/data/JobStatusExport.csv';
-const response = await fetch(GITHUB_CSV_URL + '?t=' + Date.now());
-I also fixed the Refresh now button so it works in GitHub mode — previously it did nothing if no local file was selected. Now it forces a fresh fetch from GitHub immediately.
-
-To deploy: replace your index.html in the repo with this file, commit and push, and the dashboard will always show the latest data.
-
-
-Index
-Code · HTML 
-You said: I can see the csv in the cloud repo is updating.
-I can see the csv in the cloud repo is updating. however, can we get the html to pull that data automatically as well when we go to the page link
-
-11:42
-Claude responded: The current code already tries to auto-load but still flashes the setup panel first.
-
-Analyzed auto-load functionality and identified improvement opportunity
-Analyzed auto-load functionality and identified improvement opportunity
-The current code already tries to auto-load but still flashes the setup panel first. The fix is to hide the setup panel immediately on load and show a loading screen instead, then jump straight to the dashboard once the CSV arrives.
-
-
-Edited 2 files
-Edited 2 files
-Now update the JavaScript to handle the new loading screen and fallback logic:
-
-
-Edited a file, read a file
-Edited a file, read a file
-Here's what changed and how it now works:
-
-When you open the page:
-
-Spinner loads instantly — no setup panel
-Fetches CSV from GitHub automatically
-Dashboard appears with your live data — no clicking required
-If GitHub fails (no internet, token issue, etc.):
-
-Shows an error panel with a Retry button and a manual CSV fallback option
-Every 60 seconds:
-
-Silently refreshes in the background
-If refresh fails it shows a toast but keeps the existing data visible — dashboard stays up
-Just replace your index.html in the repo with this file and push it.
-
-
-Index
-Code · HTML 
-You said: the index code is still showing the setup panel.
-the index code is still showing the setup panel. it didnt pull the csv file in the data folder in the repo
-
-11:46
-Claude responded: Let me view the current file to see its exact state first.
-
-Diagnosed CSV fetch failure and identified probable causes
-Diagnosed CSV fetch failure and identified probable causes
-Let me view the current file to see its exact state first.
-
-
-Identified CSS override conflict and planned comprehensive file rewrite
-Identified CSS override conflict and planned comprehensive file rewrite
-Found the problem. The CSS on line 12 has #setupPanel { display:flex } which overrides the style="display:none" set in the HTML. The CSS always wins over inline styles when using an ID selector in a stylesheet. Let me rewrite the file cleanly from scratch with this fixed properly.
-
-
-Clean rewrite of dashboard - auto-loads CSV from GitHub on open, no setup panel shown
-Clean rewrite of dashboard - auto-loads CSV from GitHub on open, no setup panel shown
-Claude's response was interrupted.
-You said: I do have this code as script,js as well in the repo
-I do have this code as script,js as well in the repo
-document.addEventListener("DOMContentLoaded", () => {
-  loadCSV("data/dashboard.csv");
-});
-function loadCSV(csvPath) {
-  fetch(csvPath)
-    .then(response => {
-      if (!response.ok) {
-        throw new Error("CSV file not found: " + csvPath);
-      }
-      return response.text();
-    })
-    .then(csvText => {
-      displayCSV(csvText);
-    })
-    .catch(error => {
-      document.getElementById("csvTable").innerHTML =
-        <tr><td>Error loading CSV: ${error.message}</td></tr>;
-    });
-}
-function displayCSV(csvText) {
-  const table = document.getElementById("csvTable");
-  table.innerHTML = "";
-  const rows = csvText.trim().split(/\r?\n/);
-  rows.forEach((row, rowIndex) => {
-    const tr = document.createElement("tr");
-    const cells = row.split(",");
-    cells.forEach(cell => {
-      const cellElement = document.createElement(rowIndex === 0 ? "th" : "td");
-      cellElement.textContent = cell.trim();
-      tr.appendChild(cellElement);
-    });
-    table.appendChild(tr);
-  });
-}
-
-Show more
-11:47
-Claude responded: This script.
-
-Identified filename mismatch and separate script approach
-Identified filename mismatch and separate script approach
-This script.js is a completely separate, simpler script — and it has two problems that explain why nothing loads:
-
-Problem 1 — Wrong filename
-
-It's looking for data/dashboard.csv but your VBA exports data/JobStatusExport.csv:
-
-javascript
-// WRONG — this file doesn't exist in your repo
-loadCSV("data/dashboard.csv");
-
-// CORRECT — match your VBA export filename
-loadCSV("data/JobStatusExport.csv");
-Problem 2 — Basic CSV parser breaks on quoted fields
-
-Your CSV has quoted fields like "Job ID","Description",.... This script just splits by comma which will break on any cell that contains a comma inside quotes. The index.html dashboard has a proper quoted CSV parser already.
-
-You now have two separate things in your repo:
-
-File	What it does
-index.html	The full dashboard we've been building — filters, KPIs, countdown, auto-refresh
-script.js	A basic CSV-to-table renderer, likely used by a different HTML file
-What to do: Tell me which HTML file uses script.js — it'll be something like <script src="script.js"></script> in one of your repo's HTML files. Either we fix that file to point to JobStatusExport.csv, or we can drop script.js entirely and use the index.html dashboard for everything.
-
-You said: it s the index html file that need to pull the csv file
-it s the index html file that need to pull the csv file
-
-11:48
-Claude responded: So the current index.
-
-Identified CSV loading issue and architected unified solution
-Identified CSV loading issue and architected unified solution
-So the current index.html in your repo uses script.js to load the CSV but it's pointing to the wrong file. The cleanest fix is to replace everything with our self-contained dashboard that auto-loads correctly. Let me write the complete clean file now:
-
-
-Created 2 files, ran a command, read a file
-Created 2 files, ran a command, read a file
-This is a complete rewrite. The key fix was that the old CSS had #setupPanel { display:flex } which always overrode everything — that's been removed entirely. Here's how it works now:
-
-On page open:
-
-Spinner shows immediately
-Fetches data/JobStatusExport.csv directly from raw.githubusercontent.com
-Dashboard appears automatically — no clicking, no setup panel
-If the fetch fails:
-
-Shows an error screen with the exact reason and a Retry button
-Drag & drop fallback for manual CSV loading
-You can delete script.js from your repo — it's no longer needed. This file handles everything on its own.
-
-
-Index
-Code · HTML 
-You said: Update the Index html code.
-Update the Index html code. for the Table Column (Weight (kg), the value inside that list should be round off to the nearest 2 decimal places
-
-11:55
-Claude responded: Done.
-
-Viewed 3 files, edited a file, read a file
-Viewed 3 files, edited a file, read a file
-Done. The weight column now displays to 2 decimal places. The logic handles all cases:
-
-500 → 500.00
-123.5 → 123.50
-99.999 → 100.00
-Empty or non-numeric → —
-
-Index
-Code · HTML 
-
-
-
-
-Claude is AI and can make mistakes. Please double-check responses.
-Index · HTML
-Copy
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1554,16 +7,16 @@ Copy
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
 body{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;background:#F0F2F5;color:#1A2332;font-size:14px;line-height:1.5;min-height:100vh;overflow-x:hidden;max-width:100vw;}
- 
+
 /* ── SCREENS — all hidden by default, shown via JS ── */
 #loadingScreen{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;gap:1rem;}
 #errorPanel{display:none;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;padding:2rem;gap:1.5rem;}
 #dashboard{display:none;padding:1.25rem 1.5rem;max-width:1400px;margin:0 auto;}
- 
+
 @keyframes spin{to{transform:rotate(360deg);}}
 @keyframes blink{0%,100%{opacity:1;}50%{opacity:.3;}}
 .spinner{width:40px;height:40px;border:3px solid #E2E8F0;border-top-color:#D97706;border-radius:50%;animation:spin .8s linear infinite;}
- 
+
 /* error panel */
 .ep-card{background:#fff;border:1px solid #E2E8F0;border-radius:14px;padding:2rem;width:100%;max-width:460px;text-align:center;}
 .ep-card h3{font-size:15px;font-weight:600;color:#DC2626;margin-bottom:.75rem;}
@@ -1580,7 +33,7 @@ body{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;background:#F0F2F
 .drop-zone-icon{font-size:28px;margin-bottom:.4rem;}
 .drop-zone-text{font-size:13px;color:#64748B;line-height:1.6;}
 .drop-zone-text strong{color:#D97706;}
- 
+
 /* dashboard header */
 .dh{display:flex;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:1.25rem;padding:.85rem 1.25rem;background:#fff;border:1px solid #E2E8F0;border-radius:10px;flex-wrap:wrap;}
 .dh-title{font-size:16px;font-weight:600;}
@@ -1598,14 +51,14 @@ body{font-family:system-ui,-apple-system,'Segoe UI',sans-serif;background:#F0F2F
 .btn-h.amber{background:#D97706;color:#fff;border-color:#B45309;font-weight:600;}
 .btn-h.amber:hover{background:#B45309;}
 select.hsel{font-size:12px;height:32px;padding:0 8px;border:1px solid #CBD5E1;border-radius:7px;background:#fff;outline:none;}
- 
+
 /* kpi */
 .kr{display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-bottom:1.25rem;}
 .kc{background:#fff;border-radius:10px;padding:.85rem 1rem;border:1px solid #E2E8F0;}
 .kl{font-size:10px;color:#64748B;margin-bottom:4px;font-weight:500;}
 .kv{font-size:24px;font-weight:700;line-height:1.2;}
 .kd{font-size:10px;color:#94A3B8;margin-top:2px;}
- 
+
 /* filter panel */
 .fp{background:#fff;border:1px solid #E2E8F0;border-radius:10px;padding:.85rem 1.1rem;margin-bottom:.75rem;}
 .fp-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
@@ -1627,7 +80,7 @@ select.hsel{font-size:12px;height:32px;padding:0 8px;border:1px solid #CBD5E1;bo
 .btn-g:hover{background:#F8FAFC;}
 .btn-link{background:none;border:none;font-size:12px;color:#D97706;cursor:pointer;padding:0 4px;font-weight:600;}
 .btn-link:hover{text-decoration:underline;}
- 
+
 /* table */
 .tc{background:#fff;border-radius:10px;border:1px solid #E2E8F0;overflow:hidden;}
 .tc-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;width:100%;}
@@ -1658,7 +111,7 @@ select.hsel{font-size:12px;height:32px;padding:0 8px;border:1px solid #CBD5E1;bo
 </style>
 </head>
 <body>
- 
+
 <!-- Shown immediately on page open -->
 <div id="loadingScreen">
   <div style="font-size:13px;font-weight:600;color:#64748B;letter-spacing:.08em;text-transform:uppercase;">Manufacturing Dashboard</div>
@@ -1666,7 +119,7 @@ select.hsel{font-size:12px;height:32px;padding:0 8px;border:1px solid #CBD5E1;bo
   <div class="spinner"></div>
   <div id="loadingMsg" style="font-size:12px;color:#94A3B8;">Connecting to GitHub…</div>
 </div>
- 
+
 <!-- Shown only if CSV fetch fails -->
 <div id="errorPanel">
   <div class="ep-card">
@@ -1682,7 +135,7 @@ select.hsel{font-size:12px;height:32px;padding:0 8px;border:1px solid #CBD5E1;bo
     </div>
   </div>
 </div>
- 
+
 <!-- Shown after successful load -->
 <div id="dashboard">
   <div class="dh">
@@ -1703,9 +156,9 @@ select.hsel{font-size:12px;height:32px;padding:0 8px;border:1px solid #CBD5E1;bo
       <button class="btn-h amber" onclick="manualRefresh()">Refresh now</button>
     </div>
   </div>
- 
+
   <div class="kr" id="kpr"></div>
- 
+
   <div class="fp">
     <div class="fp-row">
       <span class="fp-lbl">Show status:</span>
@@ -1725,7 +178,7 @@ select.hsel{font-size:12px;height:32px;padding:0 8px;border:1px solid #CBD5E1;bo
       <button class="btn-g" onclick="resetFilters()">Reset all</button>
     </div>
   </div>
- 
+
   <div class="tc">
     <div class="tc-scroll">
       <table class="jt">
@@ -1749,27 +202,27 @@ select.hsel{font-size:12px;height:32px;padding:0 8px;border:1px solid #CBD5E1;bo
     <div class="tf" id="jtf">No data loaded</div>
   </div>
 </div>
- 
+
 <div class="toast" id="toast"></div>
- 
+
 <script>
 // ─────────────────────────────────────────────
 // CONFIG — update GITHUB_CSV_URL if repo changes
 // ─────────────────────────────────────────────
 const GITHUB_CSV_URL = 'https://raw.githubusercontent.com/MoonDropStar/corten-job-dashboard/main/data/JobStatusExport.csv';
- 
+
 // ── State ─────────────────────────────────────
 let JOBS = [], sortCol = 'id', sortDir = 1;
 let refreshMs = 60000;
 let refreshTimer = null, countdownTimer = null, nextAt = 0;
- 
+
 // ── Screen switcher ───────────────────────────
 function showScreen(id) {
   document.getElementById('loadingScreen').style.display = id === 'loadingScreen' ? 'flex'  : 'none';
   document.getElementById('errorPanel')   .style.display = id === 'errorPanel'    ? 'flex'  : 'none';
   document.getElementById('dashboard')    .style.display = id === 'dashboard'     ? 'block' : 'none';
 }
- 
+
 // ── CSV loader ────────────────────────────────
 async function loadGitHubCSV(background) {
   if (!background) {
@@ -1815,10 +268,10 @@ async function loadGitHubCSV(background) {
     }
   }
 }
- 
+
 async function retryGitHub()  { await loadGitHubCSV(false); }
 async function manualRefresh(){ await loadGitHubCSV(true); nextAt = Date.now() + refreshMs; }
- 
+
 // ── Auto-refresh ──────────────────────────────
 function startCountdown() {
   clearInterval(refreshTimer); clearInterval(countdownTimer);
@@ -1831,7 +284,7 @@ function startCountdown() {
   }, 1000);
 }
 function setRate(v) { refreshMs = parseInt(v) * 1000; startCountdown(); }
- 
+
 // ── Manual fallback (drag & drop / file pick) ─
 function loadFallback(file) {
   if (!file) return;
@@ -1855,7 +308,7 @@ document.addEventListener('drop', e => {
   const f = e.dataTransfer.files[0];
   if (f && f.name.endsWith('.csv')) loadFallback(f);
 });
- 
+
 // ── CSV parser (handles quoted fields) ────────
 function parseCSV(raw) {
   const lines = raw.trim().split(/\r?\n/);
@@ -1890,7 +343,7 @@ function parseRow(line) {
   }
   r.push(cur); return r;
 }
- 
+
 // ── Helpers ───────────────────────────────────
 function daysLeft(due) {
   if (!due) return null;
@@ -1911,7 +364,7 @@ const scls = s => ({Open:'bs','In Progress':'bw','On Hold':'bg',Completed:'bv',O
 const pcls = p => ({Critical:'br',High:'bw',Medium:'bs',Low:'bg'}[p]||'bg');
 const tcls = t => ({C:'bt-c',D:'bt-d',TBD:'bt-tbd'}[t]||'bt-tbd');
 const tlbl = t => ({C:'Collection',D:'Delivery',TBD:'To Be Determined'}[t]||t||'—');
- 
+
 // ── Filters & sort ────────────────────────────
 function populateFilters() {
   [['fpr', JOBS.map(j=>j.priority), 'All priorities'],
@@ -1950,7 +403,7 @@ function resetFilters()  {
   document.getElementById('fln').value='';
   setAllStatus(true);
 }
- 
+
 // ── Render ────────────────────────────────────
 const KPI=[
   {label:'Total jobs',  key:'total',       col:'#1A2332',sub:'all jobs'},
@@ -1994,15 +447,14 @@ function render() {
   document.getElementById('jtf').textContent =
     `Showing ${jobs.length} of ${JOBS.length} jobs`+(hidden>0?` — ${hidden} hidden by filters`:'');
 }
- 
+
 // ── Toast ─────────────────────────────────────
 function setPill(type,text){const p=document.getElementById('pill');p.className='pill '+type;p.textContent=text;}
 let ttm;
 function toast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');clearTimeout(ttm);ttm=setTimeout(()=>t.classList.remove('show'),3000);}
- 
+
 // ── START — auto-load on page open ────────────
 loadGitHubCSV(false);
 </script>
 </body>
 </html>
- 
